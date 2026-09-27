@@ -1,9 +1,9 @@
 """TICO-19: 3,071 COVID-19 health sentences professionally translated from English."""
 
 import csv
-import urllib.request
 from pathlib import Path
 
+from safetranslate.data.download import fetch
 from safetranslate.data.schema import Language, Record
 
 # Pinned to a commit so the data cannot silently change upstream
@@ -13,11 +13,9 @@ PARTS = ["dev", "test"]
 
 def download(raw_dir: Path, lang: Language) -> None:
     """Downloads both TICO-19 files for one language, skipping ones already present."""
-    raw_dir.mkdir(parents=True, exist_ok=True)
     for part in PARTS:
-        path = raw_dir / f"{part}.en-{lang}.tsv"
-        if not path.exists():
-            urllib.request.urlretrieve(f"{BASE_URL}/{part}/{path.name}", path)
+        name = f"{part}.en-{lang}.tsv"
+        fetch(f"{BASE_URL}/{part}/{name}", raw_dir / name)
 
 
 def load(raw_dir: Path, lang: Language) -> list[Record]:

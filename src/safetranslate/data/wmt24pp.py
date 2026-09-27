@@ -1,9 +1,9 @@
 """WMT24++: 998 segments (news, social, speech, literary) with post-edited references."""
 
 import json
-import urllib.request
 from pathlib import Path
 
+from safetranslate.data.download import fetch
 from safetranslate.data.schema import Language, Record
 
 # Pinned to a commit so the data cannot silently change upstream
@@ -14,11 +14,8 @@ FILES = {"zh": "en-zh_CN.jsonl", "ta": "en-ta_IN.jsonl"}
 
 def download(raw_dir: Path) -> None:
     """Downloads the Chinese and Tamil files, skipping ones already present."""
-    raw_dir.mkdir(parents=True, exist_ok=True)
     for name in FILES.values():
-        path = raw_dir / name
-        if not path.exists():
-            urllib.request.urlretrieve(f"{BASE_URL}/{name}", path)
+        fetch(f"{BASE_URL}/{name}", raw_dir / name)
 
 
 def load(raw_dir: Path, lang: Language) -> list[Record]:

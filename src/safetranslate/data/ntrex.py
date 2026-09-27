@@ -1,8 +1,8 @@
 """NTREX-128: 1,997 news sentences professionally translated from English."""
 
-import urllib.request
 from pathlib import Path
 
+from safetranslate.data.download import fetch
 from safetranslate.data.schema import Language, Record
 
 # Pinned to a commit so the data cannot silently change upstream
@@ -17,11 +17,8 @@ TARGET_FILES = {
 
 def download(raw_dir: Path) -> None:
     """Downloads the English and target files, skipping ones already present."""
-    raw_dir.mkdir(parents=True, exist_ok=True)
     for name in [SOURCE_FILE, *TARGET_FILES.values()]:
-        path = raw_dir / name
-        if not path.exists():
-            urllib.request.urlretrieve(f"{BASE_URL}/{name}", path)
+        fetch(f"{BASE_URL}/{name}", raw_dir / name)
 
 
 def load(raw_dir: Path, lang: Language) -> list[Record]:

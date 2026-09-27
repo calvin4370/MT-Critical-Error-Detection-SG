@@ -7,7 +7,7 @@ install:
 test:
 	uv run pytest
 
-# Downloads raw data (FLORES+ needs HUGGINGFACE_TOKEN from .env) and builds data/processed/
+# Downloads raw data (FLORES+ needs HF_TOKEN from .env) and builds data/processed/
 data:
 	uv run --env-file .env python -m safetranslate.data.build configs/data.yaml
 

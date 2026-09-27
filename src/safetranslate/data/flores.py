@@ -1,15 +1,15 @@
 """FLORES+: 997 dev + 1,012 devtest sentences (Wikinews, Wikijunior, Wikivoyage).
 
-The dataset is gated on Hugging Face, so downloading needs HUGGINGFACE_TOKEN in the
+The dataset is gated on Hugging Face, so downloading needs HF_TOKEN in the
 environment (e.g. `uv run --env-file .env ...`).
 """
 
 import json
 import os
-import urllib.request
 from pathlib import Path
 from typing import Literal
 
+from safetranslate.data.download import fetch
 from safetranslate.data.schema import Language, Record
 
 # Pinned to a commit so the data cannot silently change upstream
@@ -22,17 +22,11 @@ RECORD_SPLIT = {"dev": "validation", "devtest": "test"}
 
 def download(raw_dir: Path) -> None:
     """Downloads English and all target files for both splits, skipping existing ones."""
-    request_headers = {"Authorization": f"Bearer {os.environ['HUGGINGFACE_TOKEN']}"}
+    headers = {"Authorization": f"Bearer {os.environ['HF_TOKEN']}"}
     for split in RECORD_SPLIT:
-        (raw_dir / split).mkdir(parents=True, exist_ok=True)
         for code in CODES.values():
-            path = raw_dir / split / f"{code}.jsonl"
-            if not path.exists():
-                request = urllib.request.Request(
-                    f"{BASE_URL}/{split}/{code}.jsonl", headers=request_headers
-                )
-                with urllib.request.urlopen(request) as response:
-                    path.write_bytes(response.read())
+            name = f"{split}/{code}.jsonl"
+            fetch(f"{BASE_URL}/{name}", raw_dir / name, headers)
 
 
 def _read(path: Path) -> dict[int, dict]:
