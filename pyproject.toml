@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "openai>=3.19.2",
     "opencc>=1.4.2",
     "pydantic>=2.13.5",
     "pyyaml>=6.0.3",
