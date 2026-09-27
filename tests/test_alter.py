@@ -1,34 +1,21 @@
 import json
 import random
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 from safetranslate.alter.checks import EditError, apply_edits, automatic_failure, finalize
-from safetranslate.alter.generate import Edit
-from safetranslate.alter.generate import run_resumable
+from safetranslate.alter.generate import Edit, run_resumable
 from safetranslate.alter.plan import eligible_categories, plan
 from safetranslate.alter.run import alter_one, verify_one
 from safetranslate.data.schema import Record
+from fakes import FakeClient
 
 
 def _record(i: int, source: str) -> Record:
     return Record(
         id=f"r{i}", dataset="d", split="test", target_lang="ms", source=source, target="t"
     )
-
-
-class FakeClient:
-    """Stands in for the OpenAI client, replying with queued JSON strings in order."""
-
-    def __init__(self, replies: list[dict]) -> None:
-        self.replies = [json.dumps(r) for r in replies]
-        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
-
-    def _create(self, **_: object) -> SimpleNamespace:
-        message = SimpleNamespace(content=self.replies.pop(0))
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
 def test_eligible_categories_screen_the_english() -> None:

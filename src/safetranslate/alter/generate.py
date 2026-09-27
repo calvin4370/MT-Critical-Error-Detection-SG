@@ -61,12 +61,18 @@ def make_client(endpoint: LLMEndpoint) -> OpenAI:
 
 
 def ask_json(
-    client: OpenAI, model: str, prompt: str, schema: type[Parsed], json_schema: dict | None = None
+    client: OpenAI,
+    model: str,
+    prompt: str,
+    schema: type[Parsed],
+    json_schema: dict | None = None,
+    extra_body: dict | None = None,
 ) -> Parsed:
     """Sends one prompt and parses the reply into the given pydantic model.
 
     Args:
         json_schema: Stricter schema to enforce than the model's own, if given.
+        extra_body: Server-specific request options (see LLMEndpoint.extra_body).
     """
     response = client.chat.completions.create(
         model=model,
@@ -83,8 +89,7 @@ def ask_json(
                 "schema": json_schema or schema.model_json_schema(),
             },
         },
-        # Qwen3's "thinking" mode writes long reasoning first; not needed for small edits
-        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        extra_body=extra_body or {},
     )
     return schema.model_validate_json(response.choices[0].message.content or "")
 

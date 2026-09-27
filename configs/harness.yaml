@@ -1,0 +1,19 @@
+# Settings for the evaluation harness (Phase 3)
+
+processed_dir: data/processed
+altered_dir: data/altered
+out_dir: outputs/harness
+seed: 0
+
+systems:
+  # Served locally: vllm serve aisingapore/Llama-SEA-LION-v3-8B-IT --quantization fp8
+  sealion:
+    base_url: http://localhost:8000/v1
+    model: aisingapore/Llama-SEA-LION-v3-8B-IT
+  # Free tier: one request at a time, paced to stay under the per-minute limit
+  gemini:
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+    model: gemini-3.8-flash
+    api_key_env: GEMINI_API_KEY
+    max_workers: 1
+    seconds_between_requests: 6

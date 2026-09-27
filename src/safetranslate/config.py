@@ -128,11 +128,13 @@ class LLMEndpoint(_StrictModel):
         base_url: API address, e.g. "http://localhost:8000/v1".
         model: Model name as the server knows it.
         api_key_env: Environment variable holding the API key; None for local servers.
+        extra_body: Server-specific request options, e.g. turning off Qwen3's thinking.
     """
 
     base_url: str
     model: str
     api_key_env: str | None = None
+    extra_body: dict = {}
 
 
 class AlterConfig(_StrictModel):
@@ -163,3 +165,39 @@ def load_alter_config(path: str | Path) -> AlterConfig:
     """Reads and validates an alteration config YAML file."""
     with open(path, encoding="utf-8") as f:
         return AlterConfig.model_validate(yaml.safe_load(f))
+
+
+class HarnessSystem(LLMEndpoint):
+    """A model the harness can test, plus how fast it may be called.
+
+    Attributes:
+        max_workers: Parallel requests; 1 for rate-limited free APIs.
+        seconds_between_requests: Pause after each request, to stay under rate limits.
+    """
+
+    max_workers: int = Field(default=16, gt=0)
+    seconds_between_requests: float = Field(default=0, ge=0)
+
+
+class HarnessConfig(_StrictModel):
+    """Settings for the evaluation harness (Phase 3).
+
+    Attributes:
+        processed_dir: Phase 1 output (test sentences with professional references).
+        altered_dir: Phase 2 output (examples with known errors).
+        out_dir: Where predictions, translations and metrics are written.
+        seed: Random seed for sampling.
+        systems: Models that can be tested, by name.
+    """
+
+    processed_dir: Path
+    altered_dir: Path
+    out_dir: Path
+    seed: int
+    systems: dict[str, HarnessSystem]
+
+
+def load_harness_config(path: str | Path) -> HarnessConfig:
+    """Reads and validates a harness config YAML file."""
+    with open(path, encoding="utf-8") as f:
+        return HarnessConfig.model_validate(yaml.safe_load(f))

@@ -8,10 +8,13 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "mlflow>=3.16.1",
     "openai>=3.19.2",
     "opencc>=1.4.2",
     "pydantic>=2.13.5",
     "pyyaml>=6.0.3",
+    "sacrebleu>=2.6.0",
+    "sentencepiece>=0.2.2",
 ]
 
 [build-system]

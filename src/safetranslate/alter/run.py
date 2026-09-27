@@ -54,6 +54,7 @@ FEEDBACK = {
 def try_category(
     client: OpenAI,
     model: str,
+    extra_body: dict,
     record: Record,
     translation: str,
     category: Category,
@@ -71,7 +72,9 @@ def try_category(
             record.source, translation, record.target_lang, category, keep + feedback
         )
         try:
-            result = ask_json(client, model, prompt, Alteration, alteration_schema([category]))
+            result = ask_json(
+                client, model, prompt, Alteration, alteration_schema([category]), extra_body
+            )
         except ValidationError:
             reason = "invalid_reply"
             feedback = f"\nYour previous attempt was rejected: {FEEDBACK[reason]}"
@@ -89,7 +92,9 @@ def try_category(
     return reason
 
 
-def alter_one(client: OpenAI, model: str, record: Record, categories: list[Category]) -> dict:
+def alter_one(
+    client: OpenAI, model: str, record: Record, categories: list[Category], extra_body: dict = {}
+) -> dict:
     """Creates the requested errors one call at a time, each on the already-edited text.
 
     A single-category request that can't be made tries the sentence's other categories.
@@ -103,7 +108,9 @@ def alter_one(client: OpenAI, model: str, record: Record, categories: list[Categ
         translation, errors, edits, failure = record.target, [], [], None
         for category in option:
             protected = tuple(e.span for e in errors if e.category != "removed_information")
-            outcome = try_category(client, model, record, translation, category, protected)
+            outcome = try_category(
+                client, model, extra_body, record, translation, category, protected
+            )
             if isinstance(outcome, str):
                 failure = outcome
                 break
@@ -156,8 +163,9 @@ def alter(config: AlterConfig, out_dir: Path, limit: int | None) -> None:
             )
             if limit is not None:
                 tasks = rng.sample(tasks, min(limit, len(tasks)))
+            llm = config.alter_llm
             jobs += [
-                (f"{split}-{record.id}", partial(alter_one, client, config.alter_llm.model, record, cats))
+                (f"{split}-{record.id}", partial(alter_one, client, llm.model, record, cats, llm.extra_body))
                 for record, cats in tasks
             ]
     failed = run_resumable(jobs, out_dir / "alterations.jsonl", config.max_workers)
