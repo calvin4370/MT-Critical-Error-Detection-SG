@@ -28,3 +28,8 @@ comet = [
 dev = [
     "pytest>=9.1.1",
 ]
+train = [
+    "bitsandbytes>=0.50.2",
+    "peft>=0.21.0",
+    "trl>=1.14.0",
+]

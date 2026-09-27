@@ -201,3 +201,46 @@ def load_harness_config(path: str | Path) -> HarnessConfig:
     """Reads and validates a harness config YAML file."""
     with open(path, encoding="utf-8") as f:
         return HarnessConfig.model_validate(yaml.safe_load(f))
+
+
+class FinetuneConfig(_StrictModel):
+    """Settings for LoRA fine-tuning (Phases 4-5).
+
+    Attributes:
+        base_model: Hugging Face model to adapt.
+        train_file: Training examples (JSONL).
+        validation_file: Examples for measuring loss during training (JSONL).
+        validation_limit: How many validation examples to use, to keep evaluation quick.
+        out_dir: Where checkpoints and the final adapter are written.
+        max_length: Longest example in tokens; longer ones are cut.
+        lora_rank: Size of the LoRA add-on matrices.
+        lora_alpha: Scaling of the LoRA update (usually 2 x rank).
+        lora_dropout: Dropout inside the LoRA layers, against overfitting.
+        learning_rate: Step size for training.
+        epochs: Passes over the training data.
+        batch_size: Examples per GPU step.
+        gradient_accumulation: Steps summed before each update (effective batch =
+            batch_size x gradient_accumulation).
+        eval_every: Evaluate and save a checkpoint every this many updates.
+    """
+
+    base_model: str
+    train_file: Path
+    validation_file: Path
+    validation_limit: int = Field(gt=0)
+    out_dir: Path
+    max_length: int = Field(gt=0)
+    lora_rank: int = Field(gt=0)
+    lora_alpha: int = Field(gt=0)
+    lora_dropout: float = Field(ge=0, lt=1)
+    learning_rate: float = Field(gt=0)
+    epochs: float = Field(gt=0)
+    batch_size: int = Field(gt=0)
+    gradient_accumulation: int = Field(gt=0)
+    eval_every: int = Field(gt=0)
+
+
+def load_finetune_config(path: str | Path) -> FinetuneConfig:
+    """Reads and validates a fine-tuning config YAML file."""
+    with open(path, encoding="utf-8") as f:
+        return FinetuneConfig.model_validate(yaml.safe_load(f))

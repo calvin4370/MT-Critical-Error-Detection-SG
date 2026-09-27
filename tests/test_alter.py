@@ -171,3 +171,11 @@ def test_alter_one_applies_multiple_errors_one_call_each() -> None:
     result = alter_one(client, "m", record, ["wrong_quantity", "flipped_meaning"])
     assert result["altered"] == "Ambil 50 mg dua kali sehari."
     assert [e["category"] for e in result["errors"]] == ["wrong_quantity", "flipped_meaning"]
+
+
+def test_extract_json_strips_reasoning_and_code_fences() -> None:
+    from safetranslate.alter.generate import extract_json
+
+    reply = 'I should {think}.</thought> ```json\n{"translation": "Ambil 500 mg."}\n```'
+    assert json.loads(extract_json(reply)) == {"translation": "Ambil 500 mg."}
+    assert extract_json('{"a": 1}') == '{"a": 1}'

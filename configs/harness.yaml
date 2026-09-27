@@ -17,3 +17,24 @@ systems:
     api_key_env: GEMINI_API_KEY
     max_workers: 1
     seconds_between_requests: 6
+  # The Phase 4 fine-tuned evaluator: the LoRA adapter on the same FP8 base, served with
+  # vllm serve aisingapore/Llama-SEA-LION-v3-8B-IT --quantization fp8 --enable-lora
+  #   --lora-modules evaluator=outputs/finetune/evaluator/adapter
+  sealion-evaluator:
+    base_url: http://localhost:8000/v1
+    model: evaluator
+  # Comparison models, served locally when their vLLM server is running
+  qwen:
+    base_url: http://localhost:8000/v1
+    model: Qwen/Qwen3-8B-AWQ
+    extra_body: {chat_template_kwargs: {enable_thinking: false}}
+  gemma:
+    base_url: http://localhost:8000/v1
+    model: RedHatAI/gemma-3-12b-it-quantized.w4a16
+  # Gemma 4 31B via Google's API (free: 30 requests/min, 16K input tokens/min, 14.4K/day).
+  # It always "thinks" (~30 s per call), so 10 parallel requests give ~20 per minute.
+  gemma4:
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+    model: gemma-4-31b-it
+    api_key_env: GEMINI_API_KEY
+    max_workers: 10

@@ -91,7 +91,18 @@ def ask_json(
         },
         extra_body=extra_body or {},
     )
-    return schema.model_validate_json(response.choices[0].message.content or "")
+    return schema.model_validate_json(extract_json(response.choices[0].message.content or ""))
+
+
+def extract_json(text: str) -> str:
+    """Cuts the JSON object out of a reply.
+
+    Servers that don't strictly enforce the schema (e.g. Gemma via Google's API) wrap it
+    in reasoning ("...</thought>") or markdown code fences.
+    """
+    text = text.split("</thought>")[-1]
+    start, end = text.find("{"), text.rfind("}")
+    return text[start : end + 1] if start != -1 and end > start else text
 
 
 def alteration_schema(categories: list[Category]) -> dict:

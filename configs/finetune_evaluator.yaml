@@ -1,0 +1,18 @@
+# QLoRA fine-tuning of the evaluator (Phase 4)
+
+base_model: aisingapore/Llama-SEA-LION-v3-8B-IT
+train_file: data/altered/train.jsonl
+validation_file: data/altered/validation.jsonl
+validation_limit: 300
+out_dir: outputs/finetune/evaluator
+max_length: 1536   # covers 99% of examples; longer ones are dropped, not cut
+
+lora_rank: 16
+lora_alpha: 32
+lora_dropout: 0.05
+
+learning_rate: 2.0e-4
+epochs: 1
+batch_size: 1
+gradient_accumulation: 16   # effective batch of 16
+eval_every: 200
