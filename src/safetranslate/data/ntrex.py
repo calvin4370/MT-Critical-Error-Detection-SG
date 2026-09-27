@@ -5,7 +5,8 @@ from pathlib import Path
 
 from safetranslate.data.schema import Language, Record
 
-BASE_URL = "https://raw.githubusercontent.com/MicrosoftTranslator/NTREX/main/NTREX-128"
+# Pinned to a commit so the data cannot silently change upstream
+BASE_URL = "https://raw.githubusercontent.com/MicrosoftTranslator/NTREX/468c6b69c7f6a75d31d4743d9daba2af566cc18d/NTREX-128"
 SOURCE_FILE = "newstest2019-src.eng.txt"
 TARGET_FILES = {
     "zh": "newstest2019-ref.zho-CN.txt",

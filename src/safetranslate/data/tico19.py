@@ -6,7 +6,8 @@ from pathlib import Path
 
 from safetranslate.data.schema import Language, Record
 
-BASE_URL = "https://huggingface.co/datasets/gmnlp/tico19/resolve/main"
+# Pinned to a commit so the data cannot silently change upstream
+BASE_URL = "https://huggingface.co/datasets/gmnlp/tico19/resolve/55d70dc0b1d1d0b2151c5e22815d823fedac3f2f"
 PARTS = ["dev", "test"]
 
 

@@ -6,7 +6,8 @@ from pathlib import Path
 
 from safetranslate.data.schema import Language, Record
 
-BASE_URL = "https://huggingface.co/datasets/google/wmt24pp/resolve/main"
+# Pinned to a commit so the data cannot silently change upstream
+BASE_URL = "https://huggingface.co/datasets/google/wmt24pp/resolve/fd7405c06494bc66a57b25f55d217a72f96e60dc"
 # WMT24++ has no Malay
 FILES = {"zh": "en-zh_CN.jsonl", "ta": "en-ta_IN.jsonl"}
 

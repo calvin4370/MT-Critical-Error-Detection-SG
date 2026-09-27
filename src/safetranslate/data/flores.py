@@ -12,7 +12,8 @@ from typing import Literal
 
 from safetranslate.data.schema import Language, Record
 
-BASE_URL = "https://huggingface.co/datasets/openlanguagedata/flores_plus/resolve/main"
+# Pinned to a commit so the data cannot silently change upstream
+BASE_URL = "https://huggingface.co/datasets/openlanguagedata/flores_plus/resolve/5fec6c13f9e5a4db2f745d4ec0d7c9721ddc4f06"
 CODES = {"en": "eng_Latn", "zh": "cmn_Hans", "ms": "zsm_Latn", "ta": "tam_Taml"}
 FloresSplit = Literal["dev", "devtest"]
 # dev is only used for tuning; devtest is part of the final test data

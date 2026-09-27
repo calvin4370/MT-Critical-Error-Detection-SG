@@ -1,0 +1,14 @@
+name: test                            # the check's name, shown on PRs
+on:
+  push:
+    branches: [main]                  # run when main changes (e.g. after a merge)
+  pull_request:                       # run on every PR, before merging
+jobs:
+  test:
+    runs-on: ubuntu-latest            # GitHub rents a fresh Linux machine for each run
+    steps:
+      - uses: actions/checkout@v4     # copy your repo onto that machine
+      - uses: astral-sh/setup-uv@v6   # install uv
+      # --locked: fails if uv.lock is out of date, so CI uses exactly the pinned versions
+      - run: uv sync --locked         # install exactly the versions in uv.lock
+      - run: make test                # run the same tests you run locally
