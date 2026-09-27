@@ -5,6 +5,7 @@ Usage:
     python -m safetranslate.harness.run CONFIG translate SYSTEM [--sample N]
     python -m safetranslate.harness.run CONFIG judge-translations SYSTEM --judge JUDGE
     python -m safetranslate.harness.run CONFIG real-errors SYSTEM [--sample N]
+    uv run --group comet python -m safetranslate.harness.run CONFIG comet SYSTEM
 
 evaluator: SYSTEM judges the Phase 2 test examples (known errors), without a reference.
 translate: SYSTEM translates the Phase 1 test sentences.
@@ -13,6 +14,8 @@ judge-translations: JUDGE counts critical errors in SYSTEM's translations (no re
     evaluator metrics if present. References are used only for spBLEU/chrF.
 real-errors: SYSTEM judges real machine translations with human critical-error labels
     (WMT21 Chinese, IndicMT Eval Tamil), without a reference.
+comet: scores SYSTEM's saved translations with COMET-22 against the references (needs
+    the optional "comet" dependency group and a free GPU).
 --sample N: N altered examples per language and category (plus their error-free
     originals), N sentences per language, or N real translations per dataset; the same
     seed gives the same sample.
@@ -215,11 +218,42 @@ def run_real_errors(config: HarnessConfig, name: str, sample: int | None) -> Non
     print(json.dumps(metrics, indent=2))
 
 
+COMET_MODEL = "Unbabel/wmt22-comet-da"
+
+
+def run_comet(config: HarnessConfig, name: str) -> None:
+    # Imported here: the library pulls in PyTorch, so it lives in an optional group
+    from comet import download_model, load_from_checkpoint
+
+    data = config.processed_dir / "test.jsonl"
+    records = {r.id: r for r in map(Record.model_validate_json, data.open(encoding="utf-8"))}
+    out = config.out_dir / name
+    translations = {r["task_id"]: r["translation"] for r in read_jsonl(out / "translations.jsonl")}
+    ids = sorted(translations)
+    model = load_from_checkpoint(download_model(COMET_MODEL))
+    samples = [{"src": records[i].source, "mt": translations[i], "ref": records[i].target} for i in ids]
+    scores = model.predict(samples, batch_size=32, gpus=1).scores
+
+    groups: dict[str, list[float]] = defaultdict(list)
+    for record_id, score in zip(ids, scores):
+        record = records[record_id]
+        for group in ["all", record.target_lang, f"{record.target_lang}/{record.dataset}"]:
+            groups[group].append(score)
+    metrics = {g: {"comet22": sum(v) / len(v), "n": len(v)} for g, v in groups.items()}
+    (out / "comet.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    params = {"stage": "comet", "system": name, "comet_model": COMET_MODEL,
+              "sentences": len(ids), "data_sha256": file_hash(data)}
+    log_to_mlflow(f"comet-{name}", params, {f"{g}/comet22": m["comet22"] for g, m in metrics.items()},
+                  out / "comet.json")
+    print(json.dumps(metrics.get("all", {}), indent=2))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("config")
     parser.add_argument(
-        "stage", choices=["evaluator", "translate", "judge-translations", "real-errors"]
+        "stage",
+        choices=["evaluator", "translate", "judge-translations", "real-errors", "comet"],
     )
     parser.add_argument("system")
     parser.add_argument("--sample", type=int)
@@ -232,8 +266,10 @@ def main() -> None:
         run_translate(config, args.system, args.sample)
     elif args.stage == "judge-translations":
         run_judge_translations(config, args.system, args.judge)
-    else:
+    elif args.stage == "real-errors":
         run_real_errors(config, args.system, args.sample)
+    else:
+        run_comet(config, args.system)
 
 
 if __name__ == "__main__":

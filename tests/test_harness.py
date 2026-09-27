@@ -140,3 +140,28 @@ def test_load_wmt21_joins_labels_and_removes_spaces(tmp_path) -> None:
     [example] = load_wmt21(tmp_path)
     assert example.translation == "请洗手。"
     assert example.critical
+
+
+def test_run_comet_averages_scores_per_group(tmp_path, monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    from safetranslate.data.schema import Record
+
+    config, harness_run, json = _harness_setup(tmp_path, monkeypatch, [])
+    # A stand-in for the heavy COMET library, which isn't needed to test the bookkeeping
+    fake_model = SimpleNamespace(predict=lambda samples, **_: SimpleNamespace(scores=[0.8, 0.6]))
+    monkeypatch.setitem(sys.modules, "comet", SimpleNamespace(
+        download_model=lambda name: "path", load_from_checkpoint=lambda path: fake_model))
+    records = [
+        Record(id=f"ntrex-ms-00000{i}", dataset="ntrex", split="test", target_lang="ms",
+               source="s", target="t") for i in (1, 2)
+    ]
+    (tmp_path / "processed" / "test.jsonl").write_text("".join(r.model_dump_json() + "\n" for r in records))
+    (tmp_path / "out" / "fake").mkdir(parents=True)
+    (tmp_path / "out" / "fake" / "translations.jsonl").write_text(
+        "".join(json.dumps({"task_id": r.id, "translation": "x"}) + "\n" for r in records)
+    )
+    harness_run.run_comet(config, "fake")
+    metrics = json.loads((tmp_path / "out" / "fake" / "comet.json").read_text())
+    assert metrics["ms/ntrex"]["comet22"] == pytest.approx(0.7)
