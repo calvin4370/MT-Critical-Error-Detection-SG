@@ -1,13 +1,16 @@
 [project]
 name = "safetranslate"
 version = "0.1.0"
-description = "Safety evaluation of machine translation for English to Chinese, Malay and Tamil health information."
+description = "Safety evaluation of machine translation for English to Chinese, Malay and Tamil public information."
 readme = "README.md"
 authors = [
     { name = "calvin4370", email = "calvin.j.j.chan@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pydantic>=2.13.5",
+    "pyyaml>=6.0.3",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.18,<0.13.0"]

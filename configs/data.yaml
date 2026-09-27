@@ -1,0 +1,30 @@
+# Settings for building the datasets (Phase 1)
+
+languages: [zh, ms, ta]
+data_dir: data
+
+training_corpora:
+  - name: wikimedia
+    max_pairs_per_language: null   # no cap
+
+validation_sets: [flores_dev]
+test_sets: [flores_devtest, ntrex, wmt24pp, tico19]
+
+filters:
+  # A pair is dropped if either side matches any pattern
+  junk_patterns:
+    # Wiki page prefixes in English, Malay, Chinese and Tamil
+    - '(?:^|\s)(?:User|Pengguna|Category|Kategori|File|Fail|Template|Templat):\S'
+    - '(?:用户|用戶|分类|分類|文件|模板):'
+    - '(?:பயனர்|பகுப்பு|படிமம்|வார்ப்புரு):'
+    # URLs
+    - 'https?://|www\.'
+    # Wiki markup
+    - '\{\{|\}\}|\[\[|\]\]|\|'
+    # Reference-list signs
+    - '↑|\bRetrieved\b|\bdoi:|\bPMID\b'
+  length_ratio_percentiles: [1, 99]
+  strip_citation_marks: true
+
+overlap:
+  ngram_size: 13
