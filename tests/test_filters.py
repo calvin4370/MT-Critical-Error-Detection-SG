@@ -28,3 +28,24 @@ def test_filter_pairs_applies_each_rule() -> None:
     kept, dropped = filter_pairs(records, JUNK, bounds=(0.5, 2.0))
     assert [r.target for r in kept] == ["Basuh tangan anda."]
     assert dropped == {"empty": 1, "identical": 1, "junk": 1, "length_ratio": 1}
+
+
+def test_traditional_chinese_converted_to_simplified() -> None:
+    record = Record(
+        id="x", dataset="wikimedia", split="train", target_lang="zh",
+        source="The software is on the network.", target="「軟體」在網路上。",
+    )
+    kept, counts = filter_pairs([record], JUNK, bounds=(0.1, 1.0))
+    assert kept[0].target == "“软件”在网络上。"
+    assert counts == {"converted_to_simplified": 1}
+
+
+def test_simplified_chinese_vocabulary_left_alone() -> None:
+    # tw2sp would turn 文件 into 文档; already-Simplified text must not be rewritten
+    record = Record(
+        id="x", dataset="wikimedia", split="train", target_lang="zh",
+        source="Open the file.", target="打开「文件」。",
+    )
+    kept, counts = filter_pairs([record], JUNK, bounds=(0.1, 1.0))
+    assert kept[0].target == "打开“文件”。"
+    assert counts == {}
