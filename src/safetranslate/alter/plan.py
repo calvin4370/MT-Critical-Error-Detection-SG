@@ -16,10 +16,14 @@ NUMBER = re.compile(
 )
 NAME = re.compile(r"\s[A-Z][a-z]+")  # a capitalised word that isn't the first word
 MIN_WORDS_FOR_REMOVAL = 8
+# Shorter "sentences" are mostly headings or fragments ("References"), which give nonsense edits
+MIN_WORDS_TO_ALTER = 6
 
 
 def eligible_categories(source: str) -> list[Category]:
     """Returns the categories an English sentence can plausibly take, rarest first."""
+    if len(source.split()) < MIN_WORDS_TO_ALTER:
+        return []
     categories: list[Category] = []
     if NUMBER.search(source):
         categories.append("wrong_quantity")

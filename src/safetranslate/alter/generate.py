@@ -21,15 +21,31 @@ DEFINITIONS: dict[Category, str] = {
     "removed_information": "delete a piece of information, such as a warning, condition or detail",
     "added_information": "add a plausible piece of information that is not in the English",
 }
+EXAMPLES: dict[Category, str] = {
+    "wrong_quantity": 'find "500 mg", replace_with "50 mg"',
+    "wrong_name": 'find "Johor", replace_with "Melaka"',
+    "flipped_meaning": 'find "Jangan ambil", replace_with "Ambil"',
+    "removed_information": 'find " sehari", replace_with "", missing_english "a day"',
+    "added_information": 'find "sehari", replace_with "sehari selepas makan"',
+}
 Parsed = TypeVar("Parsed", bound=BaseModel)
 
 
+class Edit(BaseModel):
+    """One find-and-replace edit that creates one critical error."""
+
+    category: Category
+    find: str
+    replace_with: str
+    missing_english: str = ""
+    description: str
+
+
 class Alteration(BaseModel):
-    """What the alteration LLM returns."""
+    """What the alteration LLM returns: the edits, not the rewritten translation."""
 
     applicable: bool
-    altered_translation: str
-    errors: list[ErrorItem]
+    edits: list[Edit]
 
 
 class Verdict(BaseModel):
@@ -44,16 +60,28 @@ def make_client(endpoint: LLMEndpoint) -> OpenAI:
     return OpenAI(base_url=endpoint.base_url, api_key=api_key)
 
 
-def ask_json(client: OpenAI, model: str, prompt: str, schema: type[Parsed]) -> Parsed:
-    """Sends one prompt and parses the reply into the given pydantic model."""
+def ask_json(
+    client: OpenAI, model: str, prompt: str, schema: type[Parsed], json_schema: dict | None = None
+) -> Parsed:
+    """Sends one prompt and parses the reply into the given pydantic model.
+
+    Args:
+        json_schema: Stricter schema to enforce than the model's own, if given.
+    """
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.7,
+        # Low randomness helps the model copy text exactly
+        temperature=0.3,
+        # Stops a runaway reply instead of letting it fill the context
+        max_tokens=1024,
         # Constrains the server to produce JSON matching the schema, so parsing can't fail
         response_format={
             "type": "json_schema",
-            "json_schema": {"name": schema.__name__, "schema": schema.model_json_schema()},
+            "json_schema": {
+                "name": schema.__name__,
+                "schema": json_schema or schema.model_json_schema(),
+            },
         },
         # Qwen3's "thinking" mode writes long reasoning first; not needed for small edits
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
@@ -61,26 +89,44 @@ def ask_json(client: OpenAI, model: str, prompt: str, schema: type[Parsed]) -> P
     return schema.model_validate_json(response.choices[0].message.content or "")
 
 
-def alteration_prompt(record: Record, categories: list[Category]) -> str:
-    """Asks for a translation containing the requested critical errors, and nothing else."""
-    wanted = "\n".join(f"- {c}: {DEFINITIONS[c]}" for c in categories)
-    return f"""You are creating test data for a translation error detector.
+def alteration_schema(categories: list[Category]) -> dict:
+    """The Alteration schema, narrowed to at most one edit per requested category."""
+    schema = Alteration.model_json_schema()
+    schema["properties"]["edits"]["maxItems"] = len(categories)
+    schema["$defs"]["Edit"]["properties"]["category"] = {"enum": list(categories)}
+    return schema
 
-English: {record.source}
-Correct {LANGUAGE_NAMES[record.target_lang]} translation: {record.target}
 
-Rewrite the correct translation so it contains exactly these critical errors (one each):
-{wanted}
+def alteration_prompt(
+    source: str, translation: str, lang: str, category: Category, feedback: str = ""
+) -> str:
+    """Asks for one find-and-replace edit that creates one critical error."""
+    return f"""You are creating test data for a translation error detector. Your job is to
+CREATE an error by editing a translation. Do not look for existing errors.
 
-Rules:
-- Change as little as possible; keep everything else identical and fluent.
-- For each error, "span" must quote the changed text exactly as it appears in your
-  rewritten translation. For removed_information, quote the English words that are now
-  missing instead.
-- "description" briefly states what the English says and what the translation now says.
-- If any requested error cannot be made naturally for this sentence, set "applicable" to
-  false and leave the other fields empty.
-"""
+English: {source}
+{LANGUAGE_NAMES[lang]} translation: {translation}
+
+Create exactly one critical error of this kind, with one edit:
+- {category}: {DEFINITIONS[category]}
+
+The edit is a find-and-replace on the {LANGUAGE_NAMES[lang]} translation:
+- "find": a short phrase copied EXACTLY, character for character, from the
+  {LANGUAGE_NAMES[lang]} translation above. Never copy it from the English or the example.
+- "replace_with": what that phrase becomes, in {LANGUAGE_NAMES[lang]}. It must be
+  different from "find".
+- For removed_information: "replace_with" is "" (delete the phrase), and
+  "missing_english" quotes, exactly, the English words that are now missing. Leave
+  "missing_english" as "" for the other categories.
+- "description": what the English says and what the translation now says.
+
+Example for a different sentence (do not reuse its words). English: "Do not take more
+than 500 mg a day in Johor." Malay: "Jangan ambil lebih daripada 500 mg sehari di Johor."
+- {category}: {EXAMPLES[category]}
+
+If this error cannot be made naturally in this sentence, set "applicable" to false and
+"edits" to [].
+{feedback}"""
 
 
 def verification_prompt(alteration: dict, error: ErrorItem) -> str:

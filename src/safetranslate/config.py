@@ -144,8 +144,6 @@ class AlterConfig(_StrictModel):
         seed: Random seed for picking sentences and categories.
         per_category: How many sentences to alter per category per language, per split.
         multi_error_share: Share of altered sentences that get 2-3 errors.
-        min_similarity: Minimum similarity (0-1) between original and altered
-            translation; lower means the LLM rewrote too much.
         max_workers: How many LLM requests to send in parallel.
         alter_llm: Model that makes the alterations.
         verify_llm: Different model that confirms each error.
@@ -156,7 +154,6 @@ class AlterConfig(_StrictModel):
     seed: int
     per_category: dict[Split, int]
     multi_error_share: float = Field(ge=0, le=1)
-    min_similarity: float = Field(ge=0, le=1)
     max_workers: int = Field(gt=0)
     alter_llm: LLMEndpoint
     verify_llm: LLMEndpoint

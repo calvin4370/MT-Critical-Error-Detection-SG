@@ -15,12 +15,14 @@ from functools import partial
 from pathlib import Path
 
 from openai import OpenAI
+from pydantic import ValidationError
 
-from safetranslate.alter.checks import automatic_failure, finalize
+from safetranslate.alter.checks import EditError, apply_edits, automatic_failure, finalize
 from safetranslate.alter.generate import (
     Alteration,
     Verdict,
     alteration_prompt,
+    alteration_schema,
     ask_json,
     make_client,
     run_resumable,
@@ -33,27 +35,94 @@ from safetranslate.data.schema import Category, ErrorItem, Record
 LANGUAGES = ["zh", "ms", "ta"]
 
 
+MAX_ATTEMPTS = 3
+FEEDBACK = {
+    "find_not_found": 'The "find" text does not appear in the translation. Copy "find" '
+    "exactly, character for character, from the translation, not from the English or "
+    "the example.",
+    "no_change": '"replace_with" must be different from "find".',
+    "missing_english_not_found": '"missing_english" must be copied exactly from the '
+    "English sentence.",
+    "empty_replacement": 'Only removed_information may delete text; "replace_with" must '
+    "contain the changed words.",
+    "edits_overlap": "Your edit changed a phrase that was already edited; choose another "
+    "part of the sentence.",
+    "invalid_reply": "Your reply was not valid; keep it short.",
+}
+
+
+def try_category(
+    client: OpenAI,
+    model: str,
+    record: Record,
+    translation: str,
+    category: Category,
+    protected: tuple[str, ...] = (),
+) -> tuple[str, list[ErrorItem], list[dict]] | str:
+    """Asks for one error of one category, retrying with feedback when an edit fails.
+
+    Returns:
+        (new translation, its errors, the raw edits), or the reason it failed.
+    """
+    keep = f'\nDo not change these already-edited phrases: {list(protected)}' if protected else ""
+    feedback, reason = "", ""
+    for _ in range(MAX_ATTEMPTS):
+        prompt = alteration_prompt(
+            record.source, translation, record.target_lang, category, keep + feedback
+        )
+        try:
+            result = ask_json(client, model, prompt, Alteration, alteration_schema([category]))
+        except ValidationError:
+            reason = "invalid_reply"
+            feedback = f"\nYour previous attempt was rejected: {FEEDBACK[reason]}"
+            continue
+        if not result.applicable or not result.edits:
+            return "not_applicable"
+        try:
+            new_translation, errors = apply_edits(
+                record.source, translation, result.edits, protected
+            )
+            return new_translation, errors, [e.model_dump() for e in result.edits]
+        except EditError as err:
+            reason = str(err)
+            feedback = f"\nYour previous attempt was rejected: {FEEDBACK.get(reason, reason)}"
+    return reason
+
+
 def alter_one(client: OpenAI, model: str, record: Record, categories: list[Category]) -> dict:
-    """Asks for one alteration; a single-category request that can't be made tries others."""
-    result = ask_json(client, model, alteration_prompt(record, categories), Alteration)
-    if not result.applicable and len(categories) == 1:
-        for fallback in eligible_categories(record.source):
-            if fallback == categories[0]:
-                continue
-            categories = [fallback]
-            result = ask_json(client, model, alteration_prompt(record, categories), Alteration)
-            if result.applicable:
+    """Creates the requested errors one call at a time, each on the already-edited text.
+
+    A single-category request that can't be made tries the sentence's other categories.
+    """
+    options = [categories]
+    if len(categories) == 1:
+        options += [[c] for c in eligible_categories(record.source) if c != categories[0]]
+
+    failure: str | None = "not_applicable"
+    for option in options:
+        translation, errors, edits, failure = record.target, [], [], None
+        for category in option:
+            protected = tuple(e.span for e in errors if e.category != "removed_information")
+            outcome = try_category(client, model, record, translation, category, protected)
+            if isinstance(outcome, str):
+                failure = outcome
                 break
+            translation, new_errors, new_edits = outcome
+            errors, edits = errors + new_errors, edits + new_edits
+        if failure != "not_applicable":
+            break
     return {
         "origin_id": record.id,
         "split": record.split,
         "target_lang": record.target_lang,
         "source": record.source,
         "original": record.target,
-        "requested": categories,
-        "applicable": result.applicable,
-        "altered": result.altered_translation,
-        "errors": [e.model_dump() for e in result.errors],
+        "requested": option,
+        "applicable": failure != "not_applicable",
+        "edits": edits,
+        "failure": None if failure == "not_applicable" else failure,
+        "altered": translation if failure is None else "",
+        "errors": [e.model_dump() for e in errors] if failure is None else [],
         "model": model,
     }
 
@@ -101,7 +170,7 @@ def verify(config: AlterConfig, out_dir: Path) -> None:
     jobs = [
         (alt["task_id"], partial(verify_one, client, config.verify_llm.model, alt))
         for alt in read_jsonl(out_dir / "alterations.jsonl")
-        if automatic_failure(alt, config.min_similarity) is None
+        if automatic_failure(alt) is None
     ]
     failed = run_resumable(jobs, out_dir / "verdicts.jsonl", config.max_workers)
     print(f"{len(jobs)} verification tasks, {failed} failed (rerun to retry them)")
@@ -124,7 +193,7 @@ def main() -> None:
     else:
         verdicts = {v["task_id"]: v["valid"] for v in read_jsonl(out_dir / "verdicts.jsonl")}
         alterations = read_jsonl(out_dir / "alterations.jsonl")
-        print(json.dumps(finalize(alterations, verdicts, config.min_similarity, out_dir), indent=2))
+        print(json.dumps(finalize(alterations, verdicts, out_dir), indent=2))
 
 
 if __name__ == "__main__":
