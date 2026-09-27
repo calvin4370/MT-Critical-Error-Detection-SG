@@ -4,14 +4,18 @@ Usage:
     python -m safetranslate.harness.run CONFIG evaluator SYSTEM [--sample N]
     python -m safetranslate.harness.run CONFIG translate SYSTEM [--sample N]
     python -m safetranslate.harness.run CONFIG judge-translations SYSTEM --judge JUDGE
+    python -m safetranslate.harness.run CONFIG real-errors SYSTEM [--sample N]
 
 evaluator: SYSTEM judges the Phase 2 test examples (known errors), without a reference.
 translate: SYSTEM translates the Phase 1 test sentences.
 judge-translations: JUDGE counts critical errors in SYSTEM's translations (no reference,
     matching how JUDGE's accuracy is measured); rates are corrected with JUDGE's
     evaluator metrics if present. References are used only for spBLEU/chrF.
+real-errors: SYSTEM judges real machine translations with human critical-error labels
+    (WMT21 Chinese, IndicMT Eval Tamil), without a reference.
 --sample N: N altered examples per language and category (plus their error-free
-    originals), or N sentences per language; the same seed gives the same sample.
+    originals), N sentences per language, or N real translations per dataset; the same
+    seed gives the same sample.
 """
 
 import argparse
@@ -29,8 +33,10 @@ import mlflow
 from safetranslate.alter.generate import make_client, run_resumable
 from safetranslate.alter.run import read_jsonl
 from safetranslate.config import HarnessConfig, HarnessSystem, load_harness_config
-from safetranslate.data.schema import ErrorItem, EvaluatorExample, Record
+from safetranslate.data import real_errors
+from safetranslate.data.schema import ErrorItem, EvaluatorExample, LabelledTranslation, Record
 from safetranslate.harness.metrics import (
+    binary_metrics,
     evaluator_metrics,
     rogan_gladen,
     translation_scores,
@@ -178,10 +184,43 @@ def run_judge_translations(config: HarnessConfig, name: str, judge_name: str) ->
     print(json.dumps(metrics.get("all", {}), indent=2))
 
 
+def run_real_errors(config: HarnessConfig, name: str, sample: int | None) -> None:
+    system, raw = config.systems[name], config.processed_dir.parent / "raw"
+    client = make_client(system)
+    real_errors.download(raw)
+    datasets = {"wmt21_ced": real_errors.load_wmt21(raw), "indicmt": real_errors.load_indicmt(raw)}
+    rng = random.Random(config.seed)
+    if sample:
+        datasets = {k: rng.sample(v, min(sample, len(v))) for k, v in datasets.items()}
+    out = config.out_dir / name / "real_errors"
+
+    def job(example: LabelledTranslation) -> dict:
+        errors = judge(client, system, example.source, example.translation, example.target_lang)
+        return {"errors": [e.model_dump() for e in errors]}
+
+    examples = [e for group in datasets.values() for e in group]
+    jobs = [(e.id, partial(paced, system, partial(job, e))) for e in examples]
+    run_resumable(jobs, out / "predictions.jsonl", system.max_workers)
+
+    flagged = {r["task_id"]: bool(r["errors"]) for r in read_jsonl(out / "predictions.jsonl")}
+    metrics = {}
+    for dataset, group in datasets.items():
+        scored = [e for e in group if e.id in flagged]
+        metrics[dataset] = binary_metrics([e.critical for e in scored], [flagged[e.id] for e in scored])
+    (out / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    flat = {f"{g}/{k}": (v["rate"] if isinstance(v, dict) else v) for g, m in metrics.items() for k, v in m.items()}
+    params = {"stage": "real_errors", "system": name, "model": system.model, "sample": sample,
+              "examples": len(flagged)}
+    log_to_mlflow(f"real-errors-{name}", params, flat, out / "metrics.json")
+    print(json.dumps(metrics, indent=2))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("config")
-    parser.add_argument("stage", choices=["evaluator", "translate", "judge-translations"])
+    parser.add_argument(
+        "stage", choices=["evaluator", "translate", "judge-translations", "real-errors"]
+    )
     parser.add_argument("system")
     parser.add_argument("--sample", type=int)
     parser.add_argument("--judge")
@@ -191,8 +230,10 @@ def main() -> None:
         run_evaluator(config, args.system, args.sample)
     elif args.stage == "translate":
         run_translate(config, args.system, args.sample)
-    else:
+    elif args.stage == "judge-translations":
         run_judge_translations(config, args.system, args.judge)
+    else:
+        run_real_errors(config, args.system, args.sample)
 
 
 if __name__ == "__main__":

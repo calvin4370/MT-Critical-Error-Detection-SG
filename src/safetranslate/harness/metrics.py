@@ -60,6 +60,17 @@ def evaluator_metrics(
     return results
 
 
+def binary_metrics(labels: list[bool], flagged: list[bool]) -> dict:
+    """Recall, false-positive rate and precision for yes/no critical-error labels."""
+    caught = sum(l and f for l, f in zip(labels, flagged))
+    false_alarms = sum(f and not l for l, f in zip(labels, flagged))
+    return {
+        "recall": wilson(caught, sum(labels)),
+        "false_positive_rate": wilson(false_alarms, len(labels) - sum(labels)),
+        "precision": caught / (caught + false_alarms) if caught + false_alarms else None,
+    }
+
+
 def rogan_gladen(apparent_rate: float, sensitivity: float, specificity: float) -> float:
     """Estimates a true rate from an imperfect detector's rate and its known accuracy.
 

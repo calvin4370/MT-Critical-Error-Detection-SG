@@ -112,3 +112,31 @@ def test_sample_examples_keeps_originals() -> None:
     chosen = sample_examples(altered + originals, 2, random.Random(0))
     assert len(chosen) == 4
     assert {e.id for e in chosen if not e.errors} == {f"{e.id}-original" for e in chosen if e.errors}
+
+
+def test_binary_metrics() -> None:
+    from safetranslate.harness.metrics import binary_metrics
+
+    m = binary_metrics([True, True, False, False], [True, False, True, False])
+    assert m["recall"]["rate"] == 0.5
+    assert m["false_positive_rate"]["rate"] == 0.5
+    assert m["precision"] == 0.5
+
+
+def test_load_wmt21_joins_labels_and_removes_spaces(tmp_path) -> None:
+    import io
+    import tarfile
+
+    from safetranslate.data.real_errors import load_wmt21
+
+    folder = tmp_path / "wmt21_ced"
+    folder.mkdir()
+    (folder / "test_blind.tsv").write_text("7\tWash your hands.\t请 洗 手 。\n")
+    gold = b"en-zh\tREFERENCE\t7\tERR\n"
+    with tarfile.open(folder / "goldlabels.tar.gz", "w:gz") as tar:
+        info = tarfile.TarInfo("enzh_majority_test_goldlabels/goldlabels.txt")
+        info.size = len(gold)
+        tar.addfile(info, io.BytesIO(gold))
+    [example] = load_wmt21(tmp_path)
+    assert example.translation == "请洗手。"
+    assert example.critical
