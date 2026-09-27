@@ -1,0 +1,2 @@
+{"lp": "en-zh_CN", "domain": "canary", "document_id": "canary", "segment_id": 0, "is_bad_source": true, "source": "CANARY GUID 123", "target": "金丝雀 123", "original_target": "金丝雀 123"}
+{"lp": "en-zh_CN", "domain": "news", "document_id": "doc1", "segment_id": 1, "is_bad_source": false, "source": "Wash your hands.", "target": "请洗手。", "original_target": "洗手。"}
