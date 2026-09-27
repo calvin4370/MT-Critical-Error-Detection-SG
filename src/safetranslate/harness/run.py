@@ -7,8 +7,9 @@ Usage:
 
 evaluator: SYSTEM judges the Phase 2 test examples (known errors), without a reference.
 translate: SYSTEM translates the Phase 1 test sentences.
-judge-translations: JUDGE counts critical errors in SYSTEM's translations, with the
-    professional reference; rates are corrected with JUDGE's evaluator metrics if present.
+judge-translations: JUDGE counts critical errors in SYSTEM's translations (no reference,
+    matching how JUDGE's accuracy is measured); rates are corrected with JUDGE's
+    evaluator metrics if present. References are used only for spBLEU/chrF.
 --sample N: N altered examples per language and category (plus their error-free
     originals), or N sentences per language; the same seed gives the same sample.
 """
@@ -133,8 +134,9 @@ def run_judge_translations(config: HarnessConfig, name: str, judge_name: str) ->
 
     def job(record_id: str) -> dict:
         record = records[record_id]
-        errors = judge(client, judge_system, record.source, translations[record_id],
-                       record.target_lang, reference=record.target)
+        errors = judge(
+            client, judge_system, record.source, translations[record_id], record.target_lang
+        )
         return {"errors": [e.model_dump() for e in errors]}
 
     jobs = [(i, partial(paced, judge_system, partial(job, i))) for i in translations]
