@@ -3,6 +3,7 @@ name = "safetranslate"
 version = "0.1.0"
 description = "Safety evaluation of machine translation for English to Chinese, Malay and Tamil public information."
 readme = "README.md"
+license = "Apache-2.0"
 authors = [
     { name = "calvin4370", email = "calvin.j.j.chan@gmail.com" }
 ]
