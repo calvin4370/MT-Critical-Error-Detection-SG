@@ -169,10 +169,11 @@ def run_judge_translations(config: HarnessConfig, name: str, judge_name: str) ->
         lang = group.split("/")[0]
         accuracy = judge_metrics.get(lang, {})
         corrected = None
-        if accuracy and rate["rate"] is not None:
-            sensitivity = accuracy["recall"]["rate"]
-            specificity = 1 - accuracy["false_positive_rate"]["rate"]
-            corrected = rogan_gladen(rate["rate"], sensitivity, specificity)
+        sensitivity = accuracy.get("recall", {}).get("rate")
+        false_positive_rate = accuracy.get("false_positive_rate", {}).get("rate")
+        # No correction when the judge's accuracy is unknown or no better than chance
+        if None not in (rate["rate"], sensitivity, false_positive_rate) and sensitivity > false_positive_rate:
+            corrected = rogan_gladen(rate["rate"], sensitivity, 1 - false_positive_rate)
         metrics[group] = {
             "critical_error_rate": rate,
             "corrected_critical_error_rate": corrected,
