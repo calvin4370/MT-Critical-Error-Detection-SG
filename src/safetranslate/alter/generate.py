@@ -172,6 +172,18 @@ count. First explain the difference in "reason". Then set "meaning_changed", and
 """
 
 
+def read_jsonl(path: Path) -> list[dict]:
+    """Reads a JSONL file, skipping a line cut off by a crash or power cut."""
+    rows = []
+    if path.exists():
+        for line in path.open(encoding="utf-8"):
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return rows
+
+
 def run_resumable(
     tasks: Iterable[tuple[str, Callable[[], dict | None]]], out_path: Path, max_workers: int
 ) -> int:
@@ -183,9 +195,7 @@ def run_resumable(
     Returns:
         How many jobs failed.
     """
-    done = set()
-    if out_path.exists():
-        done = {json.loads(line)["task_id"] for line in out_path.open(encoding="utf-8")}
+    done = {row["task_id"] for row in read_jsonl(out_path)}
     todo = [(task_id, job) for task_id, job in tasks if task_id not in done]
 
     def safe(item: tuple[str, Callable[[], dict | None]]) -> dict | None:
@@ -198,6 +208,10 @@ def run_resumable(
         return {"task_id": task_id, **result} if result is not None else None
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    # End a line cut off by a crash, so the next result isn't glued onto it
+    if out_path.exists() and not out_path.read_bytes().endswith(b"\n") and out_path.stat().st_size:
+        with out_path.open("a", encoding="utf-8") as f:
+            f.write("\n")
     failed = 0
     with ThreadPoolExecutor(max_workers) as pool, out_path.open("a", encoding="utf-8") as f:
         for result in pool.map(safe, todo):

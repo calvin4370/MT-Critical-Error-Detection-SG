@@ -27,6 +27,7 @@ from safetranslate.alter.generate import (
     alteration_schema,
     ask_json,
     make_client,
+    read_jsonl,
     run_resumable,
     verification_prompt,
 )
@@ -142,10 +143,6 @@ def verify_one(client: OpenAI, model: str, alteration: dict) -> dict:
     claimed = {e["category"] for e in alteration["errors"]}
     valid = verdict.meaning_changed and claimed <= set(verdict.categories)
     return {"valid": valid, "verdict": verdict.model_dump(), "model": model}
-
-
-def read_jsonl(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.open(encoding="utf-8")] if path.exists() else []
 
 
 def alter(config: AlterConfig, out_dir: Path, limit: int | None) -> None:

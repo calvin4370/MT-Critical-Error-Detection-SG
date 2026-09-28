@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from safetranslate.alter.checks import EditError, apply_edits, automatic_failure, finalize
-from safetranslate.alter.generate import Edit, run_resumable
+from safetranslate.alter.generate import Edit, read_jsonl, run_resumable
 from safetranslate.alter.plan import eligible_categories, plan
 from safetranslate.alter.run import alter_one, verify_one
 from safetranslate.data.schema import Record
@@ -133,6 +133,13 @@ def test_run_resumable_skips_finished_tasks(tmp_path: Path) -> None:
     )
     assert calls == []
     assert [json.loads(line)["task_id"] for line in out.open()] == ["a", "b"]
+
+
+def test_run_resumable_survives_a_cut_off_last_line(tmp_path: Path) -> None:
+    out = tmp_path / "out.jsonl"
+    out.write_text('{"task_id": "a", "x": 1}\n{"task_id": "b", "x"', encoding="utf-8")
+    run_resumable([("a", lambda: {"x": 1}), ("b", lambda: {"x": 2})], out, 2)
+    assert [row["task_id"] for row in read_jsonl(out)] == ["a", "b"]
 
 
 def test_finalize_writes_altered_and_original_examples(tmp_path: Path) -> None:
