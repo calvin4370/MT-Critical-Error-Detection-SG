@@ -5,6 +5,9 @@ For each sentence:
                           -> errors, attempts left -> notify, retry translate with feedback
                           -> errors, no attempts left -> escalate to a human
 
+Checking a translation someone already has (check_only) starts at evaluate and ends
+there: there's no translator to retry.
+
 A document is split into sentences, each runs through the graph in parallel, and the
 results are put back together in order.
 """
@@ -31,7 +34,8 @@ class SegmentState(TypedDict, total=False):
         attempts: Translations made so far.
         history: Every attempt, with its errors (for the UI and for measuring retries).
         notifications: Messages for the officer, e.g. "attempt 1 had wrong_quantity".
-        status: "published" or "escalated" once finished.
+        check_only: The translation was supplied: only check it.
+        status: "published", "escalated" or "checked" once finished.
     """
 
     source: str
@@ -41,7 +45,8 @@ class SegmentState(TypedDict, total=False):
     attempts: int
     history: list[dict]
     notifications: list[str]
-    status: Literal["published", "escalated"]
+    check_only: bool
+    status: Literal["published", "escalated", "checked"]
 
 
 def build_graph(
@@ -59,7 +64,12 @@ def build_graph(
         attempt = {"translation": state["translation"], "errors": [e.model_dump() for e in errors]}
         return {"errors": errors, "history": state.get("history", []) + [attempt]}
 
+    def start(state: SegmentState) -> str:
+        return "evaluate" if state.get("check_only") else "translate"
+
     def route(state: SegmentState) -> str:
+        if state.get("check_only"):
+            return "checked"
         if not state["errors"]:
             return "publish"
         return "notify" if state["attempts"] < max_attempts else "escalate"
@@ -72,6 +82,9 @@ def build_graph(
     def publish_node(state: SegmentState) -> SegmentState:
         return {"status": "published"}
 
+    def checked_node(state: SegmentState) -> SegmentState:
+        return {"status": "checked"}
+
     def escalate_node(state: SegmentState) -> SegmentState:
         message = f"Still had critical errors after {state['attempts']} attempts; needs human review."
         return {"status": "escalated", "notifications": state.get("notifications", []) + [message]}
@@ -82,25 +95,57 @@ def build_graph(
     graph.add_node("notify", notify_node)
     graph.add_node("publish", publish_node)
     graph.add_node("escalate", escalate_node)
-    graph.add_edge(START, "translate")
+    graph.add_node("checked", checked_node)
+    graph.add_conditional_edges(START, start, ["translate", "evaluate"])
     graph.add_edge("translate", "evaluate")
-    graph.add_conditional_edges("evaluate", route, ["publish", "notify", "escalate"])
+    graph.add_conditional_edges("evaluate", route, ["publish", "notify", "escalate", "checked"])
     graph.add_edge("notify", "translate")
     graph.add_edge("publish", END)
     graph.add_edge("escalate", END)
+    graph.add_edge("checked", END)
     return graph.compile()
 
 
-# A sentence ends at . ! ? or Chinese 。！？, followed by space or the end of the line
-SENTENCE_END = re.compile(r"(?<=[.!?。！？])\s+")
+# A sentence ends at . ! ? followed by a space, or at Chinese 。！？ (no space follows them)
+SENTENCE_END = re.compile(r"(?<=[。！？])\s*|(?<=[.!?])\s+")
+
+
+def paragraphs(text: str) -> list[str]:
+    return [p.strip() for p in text.split("\n") if p.strip()]
+
+
+def sentences(paragraph: str) -> list[str]:
+    return [s.strip() for s in SENTENCE_END.split(paragraph) if s.strip()]
 
 
 def split_document(text: str) -> list[tuple[int, str]]:
     """Splits text into (paragraph number, sentence) pairs, keeping paragraph order."""
-    pieces = []
-    for number, paragraph in enumerate(p for p in text.split("\n") if p.strip()):
-        pieces += [(number, s.strip()) for s in SENTENCE_END.split(paragraph.strip()) if s.strip()]
-    return pieces
+    return [(number, s) for number, p in enumerate(paragraphs(text)) for s in sentences(p)]
+
+
+def pair_document(english: str, translation: str) -> tuple[list[dict], tuple[int, int]]:
+    """Pairs English with its translation for checking, without ever guessing.
+
+    Paragraphs are paired by line breaks (MT tools keep them). Within a paragraph,
+    sentences are paired one-to-one if the counts match; if the MT merged or split
+    sentences, the whole paragraph is one pair. If the paragraph counts differ, the whole
+    text is one pair.
+
+    Returns:
+        Pairs ({"source", "translation", "unit": sentence/paragraph/text}) in order, and
+        the (English, translation) paragraph counts.
+    """
+    en, tr = paragraphs(english), paragraphs(translation)
+    if len(en) != len(tr):
+        return [{"source": english.strip(), "translation": translation.strip(), "unit": "text"}], (len(en), len(tr))
+    pairs = []
+    for e, t in zip(en, tr):
+        es, ts = sentences(e), sentences(t)
+        if len(es) == len(ts):
+            pairs += [{"source": a, "translation": b, "unit": "sentence"} for a, b in zip(es, ts)]
+        else:
+            pairs.append({"source": e, "translation": t, "unit": "paragraph"})
+    return pairs, (len(en), len(tr))
 
 
 def translate_document(graph, text: str, lang: Language, max_concurrency: int = 8) -> dict:
@@ -122,3 +167,17 @@ def translate_document(graph, text: str, lang: Language, max_concurrency: int = 
         "translation": "\n".join(joiner.join(sentences) for sentences in paragraphs.values()),
         "segments": states,
     }
+
+
+def check_document(graph, english: str, translation: str, lang: Language, max_concurrency: int = 8) -> dict:
+    """Checks someone's own translation for critical errors, pair by pair, in parallel.
+
+    Returns:
+        Each pair's final state (with its "unit"), and the paragraph counts.
+    """
+    pairs, counts = pair_document(english, translation)
+    states = graph.batch(
+        [{"source": p["source"], "translation": p["translation"], "lang": lang, "check_only": True} for p in pairs],
+        config={"max_concurrency": max_concurrency},
+    )
+    return {"segments": [s | {"unit": p["unit"]} for p, s in zip(pairs, states)], "paragraphs": counts}
