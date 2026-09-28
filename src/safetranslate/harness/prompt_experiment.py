@@ -12,7 +12,7 @@ import random
 import sys
 from concurrent.futures import ThreadPoolExecutor
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from safetranslate.alter.generate import ask_json, make_client
 from safetranslate.config import load_harness_config
@@ -35,17 +35,21 @@ class DecideFirst(BaseModel):
     errors: list[ErrorItem] = Field(max_length=MAX_ERRORS)
 
 
-def flags(client, system, variant: str, source: str, translation: str, lang: str) -> bool:
-    """Whether a prompt variant says the translation has a critical error."""
+def flags(client, system, variant: str, source: str, translation: str, lang: str) -> bool | None:
+    """Whether a prompt variant says the translation has a critical error (None: unusable reply)."""
     prompt = judge_prompt(source, translation, lang)
-    if variant == "A":
-        reply = ask_json(client, system.model, prompt, Judgement, extra_body=system.extra_body)
-        return bool(reply.errors)
-    if variant == "C":
-        prompt += CALIBRATION
-    prompt += '\nFirst decide "has_critical_error" (true or false); list errors only if true.'
-    reply = ask_json(client, system.model, prompt, DecideFirst, extra_body=system.extra_body)
-    return reply.has_critical_error
+    # A cut-off or malformed reply is counted as a failure, not allowed to stop the experiment
+    try:
+        if variant == "A":
+            reply = ask_json(client, system.model, prompt, Judgement, extra_body=system.extra_body)
+            return bool(reply.errors)
+        if variant == "C":
+            prompt += CALIBRATION
+        prompt += '\nFirst decide "has_critical_error" (true or false); list errors only if true.'
+        reply = ask_json(client, system.model, prompt, DecideFirst, extra_body=system.extra_body)
+        return reply.has_critical_error
+    except ValidationError:
+        return None
 
 
 def main() -> None:
@@ -71,10 +75,11 @@ def main() -> None:
         with ThreadPoolExecutor(system.max_workers) as pool:
             said = list(pool.map(lambda it: flags(client, system, variant, *it[1:4]), items))
         for group in ["wmt21_ced", "indicmt", "synthetic"]:
-            idx = [i for i, it in enumerate(items) if it[0] == group]
+            idx = [i for i, it in enumerate(items) if it[0] == group and said[i] is not None]
+            failed = sum(it[0] == group for it in items) - len(idx)
             m = binary_metrics([items[i][4] for i in idx], [said[i] for i in idx])
-            results[f"{variant}/{group}"] = {k: (v["rate"] if isinstance(v, dict) else v) for k, v in m.items()}
-            print(f"{variant} {group:10} recall {m['recall']['rate']:.0%}  false-positive rate {m['false_positive_rate']['rate']:.0%}")
+            results[f"{variant}/{group}"] = {k: (v["rate"] if isinstance(v, dict) else v) for k, v in m.items()} | {"failed": failed}
+            print(f"{variant} {group:10} recall {m['recall']['rate']:.0%}  false-positive rate {m['false_positive_rate']['rate']:.0%}  failed {failed}")
     out = config.out_dir / sys.argv[2] / "prompt_experiment.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(results, indent=2))
