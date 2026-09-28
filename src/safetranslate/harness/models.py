@@ -53,7 +53,8 @@ def judge(
     """
     prompt = judge_prompt(source, translation, lang)
     return ask_json(
-        client, endpoint.model, prompt, Judgement, extra_body=endpoint.extra_body
+        client, endpoint.model, prompt, Judgement, extra_body=endpoint.extra_body,
+        enforce_schema=endpoint.enforce_schema,
     ).errors
 
 

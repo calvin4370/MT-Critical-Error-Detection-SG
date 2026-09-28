@@ -129,12 +129,16 @@ class LLMEndpoint(_StrictModel):
         model: Model name as the server knows it.
         api_key_env: Environment variable holding the API key; None for local servers.
         extra_body: Server-specific request options, e.g. turning off Qwen3's thinking.
+        enforce_schema: Constrain the output to the JSON schema. Off for a model fine-tuned
+            on the exact format: the server's constrained JSON adds a space after ":" that
+            the model never saw in training, which derails it. Replies are still validated.
     """
 
     base_url: str
     model: str
     api_key_env: str | None = None
     extra_body: dict = {}
+    enforce_schema: bool = True
 
 
 class AlterConfig(_StrictModel):
@@ -222,9 +226,12 @@ class FinetuneConfig(_StrictModel):
         gradient_accumulation: Steps summed before each update (effective batch =
             batch_size x gradient_accumulation).
         eval_every: Evaluate and save a checkpoint every this many updates.
+        quantize: Load the frozen base in 4-bit (QLoRA, fits 12 GB); False trains LoRA on
+            the full 16-bit base (needs ~24 GB).
     """
 
     base_model: str
+    quantize: bool = True
     train_file: Path
     validation_file: Path
     validation_limit: int = Field(gt=0)

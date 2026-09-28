@@ -73,13 +73,21 @@ def ask_json(
     schema: type[Parsed],
     json_schema: dict | None = None,
     extra_body: dict | None = None,
+    enforce_schema: bool = True,
 ) -> Parsed:
     """Sends one prompt and parses the reply into the given pydantic model.
 
     Args:
         json_schema: Stricter schema to enforce than the model's own, if given.
         extra_body: Server-specific request options (see LLMEndpoint.extra_body).
+        enforce_schema: Constrain the server's output to the schema (see
+            LLMEndpoint.enforce_schema); the reply is validated either way.
     """
+    # Constrains the server to produce JSON matching the schema, so parsing can't fail
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {"name": schema.__name__, "schema": json_schema or schema.model_json_schema()},
+    }
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
@@ -87,15 +95,8 @@ def ask_json(
         temperature=0.3,
         # Stops a runaway reply instead of letting it fill the context
         max_tokens=1024,
-        # Constrains the server to produce JSON matching the schema, so parsing can't fail
-        response_format={
-            "type": "json_schema",
-            "json_schema": {
-                "name": schema.__name__,
-                "schema": json_schema or schema.model_json_schema(),
-            },
-        },
         extra_body=extra_body or {},
+        **({"response_format": response_format} if enforce_schema else {}),
     )
     return schema.model_validate_json(extract_json(response.choices[0].message.content or ""))
 

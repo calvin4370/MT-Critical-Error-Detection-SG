@@ -29,3 +29,12 @@ def test_read_examples_respects_limit(tmp_path: Path) -> None:
 def test_repo_finetune_config_loads() -> None:
     config = load_finetune_config(Path(__file__).parents[1] / "configs" / "finetune_evaluator.yaml")
     assert config.lora_alpha == 2 * config.lora_rank
+
+
+def test_lora16_config_differs_from_qlora_only_in_quantisation() -> None:
+    configs = Path(__file__).parents[1] / "configs"
+    qlora = load_finetune_config(configs / "finetune_evaluator.yaml")
+    lora16 = load_finetune_config(configs / "finetune_evaluator_lora16.yaml")
+    assert qlora.quantize and not lora16.quantize
+    # A fair comparison: everything else is identical
+    assert qlora.model_dump(exclude={"quantize", "out_dir"}) == lora16.model_dump(exclude={"quantize", "out_dir"})

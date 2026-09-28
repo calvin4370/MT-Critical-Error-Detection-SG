@@ -165,3 +165,11 @@ def test_run_comet_averages_scores_per_group(tmp_path, monkeypatch) -> None:
     harness_run.run_comet(config, "fake")
     metrics = json.loads((tmp_path / "out" / "fake" / "comet.json").read_text())
     assert metrics["ms/ntrex"]["comet22"] == pytest.approx(0.7)
+
+
+def test_judge_enforces_the_schema_unless_the_model_is_fine_tuned_on_it() -> None:
+    enforced, free = FakeClient([{"errors": []}]), FakeClient([{"errors": []}])
+    judge(enforced, LLMEndpoint(base_url="http://x", model="m"), "Hi.", "Hai.", "ms")
+    judge(free, LLMEndpoint(base_url="http://x", model="m", enforce_schema=False), "Hi.", "Hai.", "ms")
+    assert "response_format" in enforced.calls[0]
+    assert "response_format" not in free.calls[0]

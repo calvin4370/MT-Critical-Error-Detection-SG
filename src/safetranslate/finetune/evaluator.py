@@ -48,15 +48,17 @@ def train(config: FinetuneConfig, limit: int | None) -> None:
     os.environ.setdefault("MLFLOW_EXPERIMENT_NAME", "finetune-evaluator")
 
 
-    # QLoRA: the frozen base is stored in 4-bit so an 8B model trains on a 12 GB GPU
+    # QLoRA: the frozen base is stored in 4-bit so an 8B model trains on a 12 GB GPU;
+    # without it, plain LoRA on the 16-bit base (a larger cloud GPU) for comparison
     quantisation = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
         bnb_4bit_use_double_quant=True,
         bnb_4bit_compute_dtype=torch.bfloat16,
-    )
+    ) if config.quantize else None
     model = AutoModelForCausalLM.from_pretrained(
-        config.base_model, quantization_config=quantisation, dtype=torch.bfloat16
+        config.base_model, quantization_config=quantisation, dtype=torch.bfloat16,
+        device_map=None if config.quantize else "cuda",
     )
     tokenizer = AutoTokenizer.from_pretrained(config.base_model)
     if tokenizer.pad_token is None:
