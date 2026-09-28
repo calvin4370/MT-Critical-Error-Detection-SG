@@ -1,6 +1,6 @@
 """Builds comparison tables (Markdown) from the harness outputs.
 
-Usage: uv run python -m safetranslate.harness.report configs/harness.yaml
+Usage: uv run python -m safetranslate.harness.report configs/harness.yaml [configs/workflow.yaml]
 
 Models are compared only on the items every one of them was run on, because each
 model's own metric files can cover different numbers of sentences.
@@ -12,12 +12,14 @@ from collections import defaultdict
 from pathlib import Path
 
 from safetranslate.alter.run import read_jsonl
-from safetranslate.config import HarnessConfig, load_harness_config
+from safetranslate.config import HarnessConfig, WorkflowConfig, load_harness_config, load_workflow_config
 from safetranslate.data import real_errors
 from safetranslate.data.schema import Record
-from safetranslate.harness.metrics import binary_metrics, translation_scores
+from safetranslate.harness.metrics import binary_metrics, rogan_gladen, translation_scores, wilson
 
 LANGUAGES = ["zh", "ms", "ta"]
+# The fine-tuned evaluator counts critical errors in every model's translations
+JUDGE = "sealion-evaluator"
 
 
 def percent(rate: dict) -> str:
@@ -96,8 +98,67 @@ def synthetic_section(config: HarnessConfig, systems: list[str]) -> str:
     )
 
 
+def corrected(rate: dict, accuracy: dict) -> str:
+    """The rate corrected for the judge's measured accuracy, or "-" if it can't be."""
+    sensitivity = accuracy.get("recall", {}).get("rate")
+    false_positive_rate = accuracy.get("false_positive_rate", {}).get("rate")
+    if None in (rate["rate"], sensitivity, false_positive_rate) or sensitivity <= false_positive_rate:
+        return "-"
+    return f"{rogan_gladen(rate['rate'], sensitivity, 1 - false_positive_rate):.1%}"
+
+
+def translator_error_section(config: HarnessConfig, systems: list[str], judge: str = JUDGE) -> str:
+    title = f"## Critical errors in each model's translations (judged by {judge}; same sentences for every model)"
+    judged = {
+        s: {r["task_id"]: bool(r["errors"]) for r in read_jsonl(config.out_dir / s / f"judged_by_{judge}.jsonl")}
+        for s in systems
+    }
+    systems = [s for s in systems if judged[s]]
+    if not systems:
+        return f"{title}\n\nNot run yet."
+    records = {r.id: r for r in map(Record.model_validate_json, (config.processed_dir / "test.jsonl").open(encoding="utf-8"))}
+    accuracy_path = config.out_dir / judge / "evaluator" / "metrics.json"
+    accuracy = json.loads(accuracy_path.read_text()) if accuracy_path.exists() else {}
+    common = set.intersection(*(set(judged[s]) for s in systems))
+    rows = []
+    for lang in LANGUAGES:
+        ids = [i for i in common if records[i].target_lang == lang]
+        for s in systems:
+            rate = wilson(sum(judged[s][i] for i in ids), len(ids))
+            rows.append([lang, s, str(len(ids)), percent(rate), corrected(rate, accuracy.get(lang, {}))])
+    return f"{title}\n\n" + table(
+        ["Language", "Model", "Sentences", "Flagged by the judge (95% CI)", "Corrected for the judge's accuracy"], rows
+    )
+
+
+def workflow_section(workflow: WorkflowConfig | None) -> str:
+    title = "## The translation workflow (translate, check, retry, escalate)"
+    path = workflow.out_dir / f"metrics_checked_by_{workflow.checker}.json" if workflow else None
+    if not path or not path.exists():
+        return f"{title}\n\nNot run yet."
+    metrics = json.loads(path.read_text())
+    rows = [
+        [group, str(m["sentences"]), percent(m["published_first_try"]), percent(m["fixed_by_retry"]),
+         percent(m["escalated"]), f"{m['mean_attempts']:.2f}", percent(m["errors_single_pass"]),
+         percent(m["errors_reaching_readers"])]
+        for group, m in metrics.items()
+    ]
+    return (
+        f"{title}\n\nTranslator: {workflow.translator}; evaluator: {workflow.evaluator}; errors counted by an "
+        f"independent checker ({workflow.checker}). \"Single pass\" is the first translation published as is; "
+        "escalated sentences go to a person instead of readers.\n\n"
+        + table(
+            ["Group", "Sentences", "Published first time", "Fixed by retry", "Escalated", "Mean attempts",
+             "Errors, single pass", "Errors reaching readers"],
+            rows,
+        )
+    )
+
+
 def main() -> None:
     config = load_harness_config(sys.argv[1])
+    workflow_path = Path(sys.argv[2] if len(sys.argv) > 2 else "configs/workflow.yaml")
+    workflow = load_workflow_config(workflow_path) if workflow_path.exists() else None
     systems = [s for s in config.systems if (config.out_dir / s).exists()]
     translators = [s for s in systems if (config.out_dir / s / "translations.jsonl").exists()]
     sections = [
@@ -105,6 +166,8 @@ def main() -> None:
         translation_section(config, translators),
         real_error_section(config, systems),
         synthetic_section(config, systems),
+        translator_error_section(config, translators),
+        workflow_section(workflow),
     ]
     out = config.out_dir / "results.md"
     out.write_text("\n\n".join(sections) + "\n", encoding="utf-8")
