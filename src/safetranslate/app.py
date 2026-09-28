@@ -12,6 +12,7 @@ step-by-step walkthrough of the workflow: attempts, errors found, retries, escal
 """
 
 import html
+import json
 import re
 import sys
 
@@ -100,6 +101,7 @@ body, gradio-app {background: radial-gradient(1100px 520px at 50% -160px, rgba(0
 .setia-controls button, .setia-seg button {height: 40px !important; min-height: 40px !important; max-height: 40px !important; padding-top: 0 !important; padding-bottom: 0 !important;}
 /* Two fixed lines on wide screens; normal wrapping on narrow ones */
 @media (min-width: 1000px) {.setia-subtitle-wide {max-width: none; white-space: nowrap;}}
+.setia-results .setia-legend {justify-content: flex-start;}
 .setia-results-title {font-size: 20px; font-weight: 600; color: #1d1d1f; margin: 28px 0 4px; letter-spacing: -0.01em;}
 .setia-summary {font-size: 20px; font-weight: 600; color: #1d1d1f; margin: 28px 0 6px; letter-spacing: -0.01em;}
 .setia-legend {display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; color: #6e6e73; font-size: 14px; margin: 8px 0;}
@@ -140,6 +142,7 @@ CSS += "".join(
 HEAD = """
 <script>
 (() => {
+  const EXAMPLE = EXAMPLE_JSON;
   const ease = t => 1 - Math.pow(1 - t, 3);
   let heroDone = false;
   function hero() {
@@ -233,7 +236,33 @@ HEAD = """
       update();
     });
   }
-  const run = () => { if (!heroDone) hero(); segments(); countUp(); counters(); };
+  // Demo links run an example by themselves (for screenshots): #example, #example-ms,
+  // #example-ta (tab 1) and #translate-example (tab 2)
+  let demoDone = !/^#(example|translate-example)/.test(location.hash);
+  const find = (text, root = document) => [...root.querySelectorAll('button')].find(b => b.textContent.trim() === text);
+  function demo() {
+    const example = find('Try an example');
+    if (!example || !document.querySelector('.setia-seg[data-bound]')) return;
+    demoDone = true;
+    // Let Gradio finish wiring its components first, or early clicks can be lost
+    setTimeout(runDemo, 2500);
+  }
+  function runDemo() {
+    const example = find('Try an example');
+    if (location.hash === '#translate-example') {
+      find('Translate and check', document.querySelector('.setia-tabs')).click();
+      const area = document.querySelector('#setia-view-1 .setia-input textarea');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(area, EXAMPLE);
+      area.dispatchEvent(new Event('input', {bubbles: true}));
+      setTimeout(() => find('Translate and check', document.getElementById('setia-view-1')).click(), 600);
+      return;
+    }
+    const language = {'#example-ms': 'Melayu', '#example-ta': 'தமிழ்'}[location.hash];
+    if (language) find(language, document.getElementById('setia-view-0')).click();
+    // The language choice reaches the app asynchronously, so wait before loading the example
+    setTimeout(() => { example.click(); setTimeout(() => find('Check Translation').click(), 800); }, language ? 1500 : 300);
+  }
+  const run = () => { if (!heroDone) hero(); segments(); countUp(); counters(); if (!demoDone) demo(); };
   new MutationObserver(run).observe(document.documentElement, {childList: true, subtree: true});
   run();
 })();
@@ -258,6 +287,8 @@ EXAMPLE_TRANSLATIONS = {
         "காய்ச்சல் மூன்று நாட்களுக்கு மேல் நீடித்தால் மருத்துவரைப் பார்க்கவும்."
     ),
 }
+# The translate demo link (#translate-example) types the English example in
+HEAD = HEAD.replace("EXAMPLE_JSON", json.dumps(EXAMPLE_ENGLISH))
 
 def theme():
     """Apple-style light theme in Geist: grey page, white blocks, pill buttons, blue accent."""
@@ -358,9 +389,11 @@ def summary(states: list[dict]) -> str:
     first = sum(s["status"] == "published" and s["attempts"] == 1 for s in states)
     fixed = sum(s["status"] == "published" and s["attempts"] > 1 for s in states)
     review = sum(s["status"] == "escalated" for s in states)
+    # Same look as the check tab's summary; the numbers count up when shown
+    count = lambda n: f'<span class="setia-count" data-to="{n}">{n}</span>'
     return (
-        f"**{total} sentences** · ✅ {first} published first time · "
-        f"🔁 {fixed} fixed by retry · ⚠️ {review} need human review"
+        f'<div class="setia-summary">{count(total)} sentences · ✅ {count(first)} published first time · '
+        f"🔁 {count(fixed)} fixed by retry · ⚠️ {count(review)} need human review</div>"
     )
 
 
@@ -455,7 +488,7 @@ def build_app(run_document, check_document):
             yield gr.update(), gr.update(), gr.update()
             return
         # The results section (title and colour legend) only exists once a translation is run
-        title = '<div class="setia-results-title">What the workflow did:</div>' + legend()
+        title = f'<div class="setia-results"><div class="setia-results-title">What the workflow did:</div>{legend()}</div>'
         yield "", gr.update(), title + SKELETON
         result = run_document(text, LANGUAGES[language])
         states = result["segments"]
@@ -528,7 +561,7 @@ def build_app(run_document, check_document):
                     language = language_control("lang-translate")
                 button = gr.Button("Translate and check", variant="primary", scale=1)
                 translate_clear = gr.Button("Clear", scale=1)
-            overview = gr.Markdown()
+            overview = gr.HTML()
             details = gr.HTML()
             # Page-only events: no public API endpoints
             button.click(

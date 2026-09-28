@@ -37,9 +37,8 @@ def test_walkthrough_shows_each_attempt_and_the_fix() -> None:
 def test_summary_counts_outcomes() -> None:
     escalated = {**FIXED, "status": "escalated", "attempts": 3}
     first_time = {**FIXED, "attempts": 1}
-    assert summary([FIXED, escalated, first_time]) == (
-        "**3 sentences** · ✅ 1 published first time · 🔁 1 fixed by retry · ⚠️ 1 need human review"
-    )
+    text = re.sub(r"<[^>]+>", "", summary([FIXED, escalated, first_time]))
+    assert text == "3 sentences · ✅ 1 published first time · 🔁 1 fixed by retry · ⚠️ 1 need human review"
 
 
 def test_check_card_highlights_errors_and_missing_english() -> None:
