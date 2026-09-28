@@ -244,3 +244,31 @@ def load_finetune_config(path: str | Path) -> FinetuneConfig:
     """Reads and validates a fine-tuning config YAML file."""
     with open(path, encoding="utf-8") as f:
         return FinetuneConfig.model_validate(yaml.safe_load(f))
+
+
+class WorkflowConfig(_StrictModel):
+    """Settings for running and measuring the LangGraph workflow (Phase 6).
+
+    Attributes:
+        harness_config: Harness config whose systems (models) the workflow can use.
+        translator: System name for the translate node.
+        evaluator: System name for the evaluate node.
+        checker: A different system that measures errors slipping through.
+        max_attempts: Translations tried before escalating to a human.
+        sample_per_language: Test sentences per language to run.
+        out_dir: Where results are written.
+    """
+
+    harness_config: Path
+    translator: str
+    evaluator: str
+    checker: str
+    max_attempts: int = Field(gt=0)
+    sample_per_language: int = Field(gt=0)
+    out_dir: Path
+
+
+def load_workflow_config(path: str | Path) -> WorkflowConfig:
+    """Reads and validates a workflow config YAML file."""
+    with open(path, encoding="utf-8") as f:
+        return WorkflowConfig.model_validate(yaml.safe_load(f))

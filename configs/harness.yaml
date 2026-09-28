@@ -32,9 +32,10 @@ systems:
     base_url: http://localhost:8000/v1
     model: RedHatAI/gemma-3-12b-it-quantized.w4a16
   # Gemma 4 31B via Google's API (free: 30 requests/min, 16K input tokens/min, 14.4K/day).
-  # It always "thinks" (~30 s per call), so 10 parallel requests give ~20 per minute.
+  # Reply times vary (5-35 s), so 5 parallel requests with an 8 s pause stay under 30/min.
   gemma4:
     base_url: https://generativelanguage.googleapis.com/v1beta/openai/
     model: gemma-4-31b-it
     api_key_env: GEMINI_API_KEY
-    max_workers: 10
+    max_workers: 5
+    seconds_between_requests: 8

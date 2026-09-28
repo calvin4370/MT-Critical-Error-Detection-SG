@@ -115,9 +115,13 @@ def test_alter_one_falls_back_to_another_category() -> None:
     assert result["failure"] is None
 
 
-def test_verify_one_needs_every_error_confirmed() -> None:
-    two_errors = {**ALTERATION, "errors": ALTERATION["errors"] * 2}
-    assert not verify_one(FakeClient([{"valid": True}, {"valid": False}]), "m", two_errors)["valid"]
+def test_verify_one_needs_a_meaning_change_covering_the_claim() -> None:
+    changed = {"reason": "r", "meaning_changed": True, "categories": ["wrong_quantity"]}
+    assert verify_one(FakeClient([changed]), "m", ALTERATION)["valid"]
+    wrong_kind = {**changed, "categories": ["wrong_name"]}
+    assert not verify_one(FakeClient([wrong_kind]), "m", ALTERATION)["valid"]
+    unchanged = {"reason": "r", "meaning_changed": False, "categories": []}
+    assert not verify_one(FakeClient([unchanged]), "m", ALTERATION)["valid"]
 
 
 def test_run_resumable_skips_finished_tasks(tmp_path: Path) -> None:

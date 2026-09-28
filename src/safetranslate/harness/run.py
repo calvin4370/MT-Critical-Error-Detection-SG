@@ -233,6 +233,11 @@ def run_comet(config: HarnessConfig, name: str) -> None:
     model = load_from_checkpoint(download_model(COMET_MODEL))
     samples = [{"src": records[i].source, "mt": translations[i], "ref": records[i].target} for i in ids]
     scores = model.predict(samples, batch_size=32, gpus=1).scores
+    # Per-sentence scores let the report compare models on exactly the same sentences
+    (out / "comet_scores.jsonl").write_text(
+        "".join(json.dumps({"task_id": i, "comet22": s}) + "\n" for i, s in zip(ids, scores)),
+        encoding="utf-8",
+    )
 
     groups: dict[str, list[float]] = defaultdict(list)
     for record_id, score in zip(ids, scores):

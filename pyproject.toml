@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "langgraph>=1.2.12",
     "mlflow>=3.16.1",
     "openai>=3.19.2",
     "opencc>=1.4.2",
@@ -23,6 +24,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 comet = [
+    "setuptools<81",
     "unbabel-comet>=2.2.7",
 ]
 dev = [

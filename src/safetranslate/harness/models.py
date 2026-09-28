@@ -1,17 +1,21 @@
 """The two jobs a model can be tested on: judging a translation, and translating."""
 
 from openai import OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from safetranslate.alter.generate import DEFINITIONS, LANGUAGE_NAMES, ask_json
 from safetranslate.config import LLMEndpoint
 from safetranslate.data.schema import ErrorItem, Language
 
 
+# A single sentence won't have more; the cap stops runaway lists that hit the length limit
+MAX_ERRORS = 10
+
+
 class Judgement(BaseModel):
     """What a judge returns: the translation's critical errors, empty if none."""
 
-    errors: list[ErrorItem]
+    errors: list[ErrorItem] = Field(max_length=MAX_ERRORS)
 
 
 class Translation(BaseModel):
@@ -53,12 +57,25 @@ def judge(
     ).errors
 
 
-def translate(client: OpenAI, endpoint: LLMEndpoint, source: str, lang: Language) -> str:
-    """Returns a model's translation of one English text."""
+def translate(
+    client: OpenAI,
+    endpoint: LLMEndpoint,
+    source: str,
+    lang: Language,
+    feedback: list[ErrorItem] | None = None,
+) -> str:
+    """Returns a model's translation of one English text.
+
+    Args:
+        feedback: Critical errors found in a previous attempt, to avoid this time.
+    """
     prompt = (
         f"Translate this English text into {LANGUAGE_NAMES[lang]}. Keep all information and "
         f"meaning; add nothing.\n\nEnglish: {source}"
     )
+    if feedback:
+        problems = "\n".join(f"- {e.category}: {e.description}" for e in feedback)
+        prompt += f"\n\nA previous translation had these critical errors; avoid them:\n{problems}"
     return ask_json(
         client, endpoint.model, prompt, Translation, extra_body=endpoint.extra_body
     ).translation

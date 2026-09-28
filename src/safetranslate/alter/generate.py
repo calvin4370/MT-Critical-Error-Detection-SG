@@ -49,15 +49,21 @@ class Alteration(BaseModel):
 
 
 class Verdict(BaseModel):
-    """What the verifier LLM returns."""
+    """What the verifier returns, judged blind (without seeing the claimed error).
 
-    valid: bool
+    The reason comes first so the model works it out before committing to a verdict.
+    """
+
+    reason: str
+    meaning_changed: bool
+    categories: list[Category]
 
 
 def make_client(endpoint: LLMEndpoint) -> OpenAI:
     """Creates a client for an OpenAI-compatible server."""
     api_key = os.environ[endpoint.api_key_env] if endpoint.api_key_env else "not-needed"
-    return OpenAI(base_url=endpoint.base_url, api_key=api_key)
+    # Extra retries with back-off ride out rate limits (429) and brief server errors (500)
+    return OpenAI(base_url=endpoint.base_url, api_key=api_key, max_retries=6)
 
 
 def ask_json(
@@ -145,22 +151,24 @@ If this error cannot be made naturally in this sentence, set "applicable" to fal
 {feedback}"""
 
 
-def verification_prompt(alteration: dict, error: ErrorItem) -> str:
-    """Asks a second model whether one claimed error is real."""
-    return f"""You are checking test data for a translation error detector.
+def verification_prompt(alteration: dict) -> str:
+    """Asks a second model, blind to the claimed error, whether the meaning changed.
+
+    Showing the claim and asking "is this correct?" made the verifier agree with
+    everything, so it only sees the two translations and decides for itself.
+    """
+    categories = "\n".join(f"- {c}: {d}" for c, d in DEFINITIONS.items())
+    return f"""Compare two translations of the same English sentence.
 
 English: {alteration["source"]}
-Correct translation: {alteration["original"]}
-Altered translation: {alteration["altered"]}
+Translation A: {alteration["original"]}
+Translation B: {alteration["altered"]}
 
-Claimed critical error in the altered translation:
-- category: {error.category} ({DEFINITIONS[error.category]})
-- span: {error.span}
-- description: {error.description}
-
-Is this claim correct: does the altered translation really differ from the correct one in
-this way, so that a reader would understand something different from the English?
-Answer with "valid": true or false.
+Does Translation B change what a reader would understand, compared with Translation A?
+Differences in wording, style, spelling or punctuation that keep the same meaning do NOT
+count. First explain the difference in "reason". Then set "meaning_changed", and list in
+"categories" each kind of meaning change B contains (empty if none):
+{categories}
 """
 
 

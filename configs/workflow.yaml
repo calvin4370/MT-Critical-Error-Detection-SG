@@ -1,0 +1,9 @@
+# Running and measuring the translation workflow (Phase 6)
+
+harness_config: configs/harness.yaml
+translator: sealion
+evaluator: sealion            # switch to sealion-evaluator once the adapter is trained
+checker: gemma                # a different model measures errors that slip through
+max_attempts: 3
+sample_per_language: 300
+out_dir: outputs/workflow

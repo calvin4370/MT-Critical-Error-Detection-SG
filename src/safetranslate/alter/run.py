@@ -2,10 +2,12 @@
 
 Usage:
     python -m safetranslate.alter.run configs/alter.yaml alter [--limit N] [--out-dir DIR]
-    python -m safetranslate.alter.run configs/alter.yaml verify [--out-dir DIR]
-    python -m safetranslate.alter.run configs/alter.yaml finalize [--out-dir DIR]
+    python -m safetranslate.alter.run configs/alter.yaml verify [--splits ...] [--out-dir DIR]
+    python -m safetranslate.alter.run configs/alter.yaml finalize [--splits ...] [--out-dir DIR]
 
 --limit N alters only N randomly chosen sentences per split and language (for a pilot).
+--splits: which splits are verified (verify) or must be verified to be kept (finalize);
+    default all. Unverified splits keep examples that pass the automatic checks.
 """
 
 import argparse
@@ -135,12 +137,11 @@ def alter_one(
 
 
 def verify_one(client: OpenAI, model: str, alteration: dict) -> dict:
-    """An alteration is valid only if the verifier confirms every one of its errors."""
-    valid = all(
-        ask_json(client, model, verification_prompt(alteration, ErrorItem(**e)), Verdict).valid
-        for e in alteration["errors"]
-    )
-    return {"valid": valid, "model": model}
+    """Valid only if the blind verifier finds a meaning change covering every claimed category."""
+    verdict = ask_json(client, model, verification_prompt(alteration), Verdict)
+    claimed = {e["category"] for e in alteration["errors"]}
+    valid = verdict.meaning_changed and claimed <= set(verdict.categories)
+    return {"valid": valid, "verdict": verdict.model_dump(), "model": model}
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -172,13 +173,13 @@ def alter(config: AlterConfig, out_dir: Path, limit: int | None) -> None:
     print(f"{len(jobs)} alteration tasks, {failed} failed (rerun to retry them)")
 
 
-def verify(config: AlterConfig, out_dir: Path) -> None:
+def verify(config: AlterConfig, out_dir: Path, splits: tuple[str, ...]) -> None:
     client = make_client(config.verify_llm)
     # Only alterations that pass the automatic checks are worth a verifier call
     jobs = [
         (alt["task_id"], partial(verify_one, client, config.verify_llm.model, alt))
         for alt in read_jsonl(out_dir / "alterations.jsonl")
-        if automatic_failure(alt) is None
+        if automatic_failure(alt) is None and alt["split"] in splits
     ]
     failed = run_resumable(jobs, out_dir / "verdicts.jsonl", config.max_workers)
     print(f"{len(jobs)} verification tasks, {failed} failed (rerun to retry them)")
@@ -190,6 +191,7 @@ def main() -> None:
     parser.add_argument("stage", choices=["alter", "verify", "finalize"])
     parser.add_argument("--limit", type=int)
     parser.add_argument("--out-dir", type=Path)
+    parser.add_argument("--splits", nargs="+", default=["train", "validation", "test"])
     args = parser.parse_args()
     config = load_alter_config(args.config)
     out_dir = args.out_dir or config.out_dir
@@ -197,11 +199,11 @@ def main() -> None:
     if args.stage == "alter":
         alter(config, out_dir, args.limit)
     elif args.stage == "verify":
-        verify(config, out_dir)
+        verify(config, out_dir, tuple(args.splits))
     else:
         verdicts = {v["task_id"]: v["valid"] for v in read_jsonl(out_dir / "verdicts.jsonl")}
         alterations = read_jsonl(out_dir / "alterations.jsonl")
-        print(json.dumps(finalize(alterations, verdicts, out_dir), indent=2))
+        print(json.dumps(finalize(alterations, verdicts, out_dir, tuple(args.splits)), indent=2))
 
 
 if __name__ == "__main__":
