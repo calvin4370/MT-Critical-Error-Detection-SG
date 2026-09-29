@@ -79,3 +79,25 @@ class EvaluatorExample(BaseModel):
     source: str
     translation: str
     errors: list[ErrorItem]
+
+
+class LabelledTranslation(BaseModel):
+    """A real machine translation that humans labelled as having a critical error or not.
+
+    Attributes:
+        id: Unique ID.
+        dataset: Dataset it came from, e.g. "wmt21_ced".
+        target_lang: Language of the translation.
+        source: The English text.
+        translation: The machine translation.
+        critical: Whether humans judged it to contain a critical error.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    dataset: str
+    target_lang: Language
+    source: str
+    translation: str
+    critical: bool

@@ -3,15 +3,20 @@ name = "safetranslate"
 version = "0.1.0"
 description = "Safety evaluation of machine translation for English to Chinese, Malay and Tamil public information."
 readme = "README.md"
+license = "Apache-2.0"
 authors = [
     { name = "calvin4370", email = "calvin.j.j.chan@gmail.com" }
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "langgraph>=1.2.12",
+    "mlflow>=3.16.1",
     "openai>=3.19.2",
     "opencc>=1.4.2",
     "pydantic>=2.13.5",
     "pyyaml>=6.0.3",
+    "sacrebleu>=2.6.0",
+    "sentencepiece>=0.2.2",
 ]
 
 [build-system]
@@ -19,6 +24,18 @@ requires = ["uv_build>=0.12.18,<0.13.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
+app = [
+    "gradio>=6.17.3",
+]
+comet = [
+    "setuptools<81",
+    "unbabel-comet>=2.2.7",
+]
 dev = [
     "pytest>=9.1.1",
+]
+train = [
+    "bitsandbytes>=0.50.2",
+    "peft>=0.21.0",
+    "trl>=1.14.0",
 ]

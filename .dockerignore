@@ -1,0 +1,13 @@
+# Secrets and private notes never go into an image
+.env
+.env.*
+private/
+CLAUDE.md
+# Large or machine-specific files: data and outputs are mounted at run time
+.venv/
+data/
+outputs/
+mlflow.db
+mlruns/
+.git/
+**/__pycache__/

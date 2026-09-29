@@ -26,6 +26,8 @@ htmlcov/
 /data/
 /outputs/
 /mlruns/
+/mlartifacts/
+/mlflow.db
 *.parquet
 !tests/fixtures/**/*.parquet
 

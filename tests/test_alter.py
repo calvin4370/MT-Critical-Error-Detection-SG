@@ -1,34 +1,21 @@
 import json
 import random
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 from safetranslate.alter.checks import EditError, apply_edits, automatic_failure, finalize
-from safetranslate.alter.generate import Edit
-from safetranslate.alter.generate import run_resumable
+from safetranslate.alter.generate import Edit, read_jsonl, run_resumable
 from safetranslate.alter.plan import eligible_categories, plan
 from safetranslate.alter.run import alter_one, verify_one
 from safetranslate.data.schema import Record
+from fakes import FakeClient
 
 
 def _record(i: int, source: str) -> Record:
     return Record(
         id=f"r{i}", dataset="d", split="test", target_lang="ms", source=source, target="t"
     )
-
-
-class FakeClient:
-    """Stands in for the OpenAI client, replying with queued JSON strings in order."""
-
-    def __init__(self, replies: list[dict]) -> None:
-        self.replies = [json.dumps(r) for r in replies]
-        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
-
-    def _create(self, **_: object) -> SimpleNamespace:
-        message = SimpleNamespace(content=self.replies.pop(0))
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
 def test_eligible_categories_screen_the_english() -> None:
@@ -128,9 +115,13 @@ def test_alter_one_falls_back_to_another_category() -> None:
     assert result["failure"] is None
 
 
-def test_verify_one_needs_every_error_confirmed() -> None:
-    two_errors = {**ALTERATION, "errors": ALTERATION["errors"] * 2}
-    assert not verify_one(FakeClient([{"valid": True}, {"valid": False}]), "m", two_errors)["valid"]
+def test_verify_one_needs_a_meaning_change_covering_the_claim() -> None:
+    changed = {"reason": "r", "meaning_changed": True, "categories": ["wrong_quantity"]}
+    assert verify_one(FakeClient([changed]), "m", ALTERATION)["valid"]
+    wrong_kind = {**changed, "categories": ["wrong_name"]}
+    assert not verify_one(FakeClient([wrong_kind]), "m", ALTERATION)["valid"]
+    unchanged = {"reason": "r", "meaning_changed": False, "categories": []}
+    assert not verify_one(FakeClient([unchanged]), "m", ALTERATION)["valid"]
 
 
 def test_run_resumable_skips_finished_tasks(tmp_path: Path) -> None:
@@ -142,6 +133,13 @@ def test_run_resumable_skips_finished_tasks(tmp_path: Path) -> None:
     )
     assert calls == []
     assert [json.loads(line)["task_id"] for line in out.open()] == ["a", "b"]
+
+
+def test_run_resumable_survives_a_cut_off_last_line(tmp_path: Path) -> None:
+    out = tmp_path / "out.jsonl"
+    out.write_text('{"task_id": "a", "x": 1}\n{"task_id": "b", "x"', encoding="utf-8")
+    run_resumable([("a", lambda: {"x": 1}), ("b", lambda: {"x": 2})], out, 2)
+    assert [row["task_id"] for row in read_jsonl(out)] == ["a", "b"]
 
 
 def test_finalize_writes_altered_and_original_examples(tmp_path: Path) -> None:
@@ -184,3 +182,11 @@ def test_alter_one_applies_multiple_errors_one_call_each() -> None:
     result = alter_one(client, "m", record, ["wrong_quantity", "flipped_meaning"])
     assert result["altered"] == "Ambil 50 mg dua kali sehari."
     assert [e["category"] for e in result["errors"]] == ["wrong_quantity", "flipped_meaning"]
+
+
+def test_extract_json_strips_reasoning_and_code_fences() -> None:
+    from safetranslate.alter.generate import extract_json
+
+    reply = 'I should {think}.</thought> ```json\n{"translation": "Ambil 500 mg."}\n```'
+    assert json.loads(extract_json(reply)) == {"translation": "Ambil 500 mg."}
+    assert extract_json('{"a": 1}') == '{"a": 1}'

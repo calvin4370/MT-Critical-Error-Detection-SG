@@ -49,25 +49,45 @@ class Alteration(BaseModel):
 
 
 class Verdict(BaseModel):
-    """What the verifier LLM returns."""
+    """What the verifier returns, judged blind (without seeing the claimed error).
 
-    valid: bool
+    The reason comes first so the model works it out before committing to a verdict.
+    """
+
+    reason: str
+    meaning_changed: bool
+    categories: list[Category]
 
 
 def make_client(endpoint: LLMEndpoint) -> OpenAI:
     """Creates a client for an OpenAI-compatible server."""
     api_key = os.environ[endpoint.api_key_env] if endpoint.api_key_env else "not-needed"
-    return OpenAI(base_url=endpoint.base_url, api_key=api_key)
+    # Extra retries with back-off ride out rate limits (429) and brief server errors (500)
+    return OpenAI(base_url=endpoint.base_url, api_key=api_key, max_retries=6)
 
 
 def ask_json(
-    client: OpenAI, model: str, prompt: str, schema: type[Parsed], json_schema: dict | None = None
+    client: OpenAI,
+    model: str,
+    prompt: str,
+    schema: type[Parsed],
+    json_schema: dict | None = None,
+    extra_body: dict | None = None,
+    enforce_schema: bool = True,
 ) -> Parsed:
     """Sends one prompt and parses the reply into the given pydantic model.
 
     Args:
         json_schema: Stricter schema to enforce than the model's own, if given.
+        extra_body: Server-specific request options (see LLMEndpoint.extra_body).
+        enforce_schema: Constrain the server's output to the schema (see
+            LLMEndpoint.enforce_schema); the reply is validated either way.
     """
+    # Constrains the server to produce JSON matching the schema, so parsing can't fail
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {"name": schema.__name__, "schema": json_schema or schema.model_json_schema()},
+    }
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
@@ -75,18 +95,21 @@ def ask_json(
         temperature=0.3,
         # Stops a runaway reply instead of letting it fill the context
         max_tokens=1024,
-        # Constrains the server to produce JSON matching the schema, so parsing can't fail
-        response_format={
-            "type": "json_schema",
-            "json_schema": {
-                "name": schema.__name__,
-                "schema": json_schema or schema.model_json_schema(),
-            },
-        },
-        # Qwen3's "thinking" mode writes long reasoning first; not needed for small edits
-        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        extra_body=extra_body or {},
+        **({"response_format": response_format} if enforce_schema else {}),
     )
-    return schema.model_validate_json(response.choices[0].message.content or "")
+    return schema.model_validate_json(extract_json(response.choices[0].message.content or ""))
+
+
+def extract_json(text: str) -> str:
+    """Cuts the JSON object out of a reply.
+
+    Servers that don't strictly enforce the schema (e.g. Gemma via Google's API) wrap it
+    in reasoning ("...</thought>") or markdown code fences.
+    """
+    text = text.split("</thought>")[-1]
+    start, end = text.find("{"), text.rfind("}")
+    return text[start : end + 1] if start != -1 and end > start else text
 
 
 def alteration_schema(categories: list[Category]) -> dict:
@@ -129,23 +152,37 @@ If this error cannot be made naturally in this sentence, set "applicable" to fal
 {feedback}"""
 
 
-def verification_prompt(alteration: dict, error: ErrorItem) -> str:
-    """Asks a second model whether one claimed error is real."""
-    return f"""You are checking test data for a translation error detector.
+def verification_prompt(alteration: dict) -> str:
+    """Asks a second model, blind to the claimed error, whether the meaning changed.
+
+    Showing the claim and asking "is this correct?" made the verifier agree with
+    everything, so it only sees the two translations and decides for itself.
+    """
+    categories = "\n".join(f"- {c}: {d}" for c, d in DEFINITIONS.items())
+    return f"""Compare two translations of the same English sentence.
 
 English: {alteration["source"]}
-Correct translation: {alteration["original"]}
-Altered translation: {alteration["altered"]}
+Translation A: {alteration["original"]}
+Translation B: {alteration["altered"]}
 
-Claimed critical error in the altered translation:
-- category: {error.category} ({DEFINITIONS[error.category]})
-- span: {error.span}
-- description: {error.description}
-
-Is this claim correct: does the altered translation really differ from the correct one in
-this way, so that a reader would understand something different from the English?
-Answer with "valid": true or false.
+Does Translation B change what a reader would understand, compared with Translation A?
+Differences in wording, style, spelling or punctuation that keep the same meaning do NOT
+count. First explain the difference in "reason". Then set "meaning_changed", and list in
+"categories" each kind of meaning change B contains (empty if none):
+{categories}
 """
+
+
+def read_jsonl(path: Path) -> list[dict]:
+    """Reads a JSONL file, skipping a line cut off by a crash or power cut."""
+    rows = []
+    if path.exists():
+        for line in path.open(encoding="utf-8"):
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return rows
 
 
 def run_resumable(
@@ -159,9 +196,7 @@ def run_resumable(
     Returns:
         How many jobs failed.
     """
-    done = set()
-    if out_path.exists():
-        done = {json.loads(line)["task_id"] for line in out_path.open(encoding="utf-8")}
+    done = {row["task_id"] for row in read_jsonl(out_path)}
     todo = [(task_id, job) for task_id, job in tasks if task_id not in done]
 
     def safe(item: tuple[str, Callable[[], dict | None]]) -> dict | None:
@@ -174,6 +209,10 @@ def run_resumable(
         return {"task_id": task_id, **result} if result is not None else None
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    # End a line cut off by a crash, so the next result isn't glued onto it
+    if out_path.exists() and not out_path.read_bytes().endswith(b"\n") and out_path.stat().st_size:
+        with out_path.open("a", encoding="utf-8") as f:
+            f.write("\n")
     failed = 0
     with ThreadPoolExecutor(max_workers) as pool, out_path.open("a", encoding="utf-8") as f:
         for result in pool.map(safe, todo):

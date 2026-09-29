@@ -1,0 +1,33 @@
+# LinguaSG with its model server, on one NVIDIA GPU: `docker compose up`, then open
+# http://localhost:7860. Needs the trained adapter in outputs/finetune/evaluator/adapter.
+services:
+  # vLLM's official image serving SEA-LION with the fine-tuned evaluator adapter
+  model:
+    image: vllm/vllm-openai:v0.30.0
+    entrypoint: ["vllm", "serve"]
+    command:
+      - aisingapore/Llama-SEA-LION-v3-8B-IT
+      - --quantization=fp8
+      - --enable-lora
+      - --max-lora-rank=16
+      - --lora-modules=evaluator=/adapters/evaluator
+      - --max-model-len=4096
+      - --gpu-memory-utilization=0.85
+      - '--structured-outputs-config={"backend": "xgrammar", "disable_any_whitespace": true}'
+    volumes:
+      - ./outputs/finetune/evaluator/adapter:/adapters/evaluator:ro
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
+
+  # The web app (CPU only); it calls the model server by its service name
+  app:
+    build:
+      context: .
+      args: {GROUPS: "--group app"}
+    command: ["python", "-m", "safetranslate.app", "configs/docker/workflow.yaml"]
+    environment: [GRADIO_SERVER_NAME=0.0.0.0]
+    ports: ["7860:7860"]
+    depends_on: [model]

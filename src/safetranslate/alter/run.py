@@ -2,10 +2,12 @@
 
 Usage:
     python -m safetranslate.alter.run configs/alter.yaml alter [--limit N] [--out-dir DIR]
-    python -m safetranslate.alter.run configs/alter.yaml verify [--out-dir DIR]
-    python -m safetranslate.alter.run configs/alter.yaml finalize [--out-dir DIR]
+    python -m safetranslate.alter.run configs/alter.yaml verify [--splits ...] [--out-dir DIR]
+    python -m safetranslate.alter.run configs/alter.yaml finalize [--splits ...] [--out-dir DIR]
 
 --limit N alters only N randomly chosen sentences per split and language (for a pilot).
+--splits: which splits are verified (verify) or must be verified to be kept (finalize);
+    default all. Unverified splits keep examples that pass the automatic checks.
 """
 
 import argparse
@@ -25,6 +27,7 @@ from safetranslate.alter.generate import (
     alteration_schema,
     ask_json,
     make_client,
+    read_jsonl,
     run_resumable,
     verification_prompt,
 )
@@ -54,6 +57,7 @@ FEEDBACK = {
 def try_category(
     client: OpenAI,
     model: str,
+    extra_body: dict,
     record: Record,
     translation: str,
     category: Category,
@@ -71,7 +75,9 @@ def try_category(
             record.source, translation, record.target_lang, category, keep + feedback
         )
         try:
-            result = ask_json(client, model, prompt, Alteration, alteration_schema([category]))
+            result = ask_json(
+                client, model, prompt, Alteration, alteration_schema([category]), extra_body
+            )
         except ValidationError:
             reason = "invalid_reply"
             feedback = f"\nYour previous attempt was rejected: {FEEDBACK[reason]}"
@@ -89,7 +95,9 @@ def try_category(
     return reason
 
 
-def alter_one(client: OpenAI, model: str, record: Record, categories: list[Category]) -> dict:
+def alter_one(
+    client: OpenAI, model: str, record: Record, categories: list[Category], extra_body: dict = {}
+) -> dict:
     """Creates the requested errors one call at a time, each on the already-edited text.
 
     A single-category request that can't be made tries the sentence's other categories.
@@ -103,7 +111,9 @@ def alter_one(client: OpenAI, model: str, record: Record, categories: list[Categ
         translation, errors, edits, failure = record.target, [], [], None
         for category in option:
             protected = tuple(e.span for e in errors if e.category != "removed_information")
-            outcome = try_category(client, model, record, translation, category, protected)
+            outcome = try_category(
+                client, model, extra_body, record, translation, category, protected
+            )
             if isinstance(outcome, str):
                 failure = outcome
                 break
@@ -128,16 +138,11 @@ def alter_one(client: OpenAI, model: str, record: Record, categories: list[Categ
 
 
 def verify_one(client: OpenAI, model: str, alteration: dict) -> dict:
-    """An alteration is valid only if the verifier confirms every one of its errors."""
-    valid = all(
-        ask_json(client, model, verification_prompt(alteration, ErrorItem(**e)), Verdict).valid
-        for e in alteration["errors"]
-    )
-    return {"valid": valid, "model": model}
-
-
-def read_jsonl(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.open(encoding="utf-8")] if path.exists() else []
+    """Valid only if the blind verifier finds a meaning change covering every claimed category."""
+    verdict = ask_json(client, model, verification_prompt(alteration), Verdict)
+    claimed = {e["category"] for e in alteration["errors"]}
+    valid = verdict.meaning_changed and claimed <= set(verdict.categories)
+    return {"valid": valid, "verdict": verdict.model_dump(), "model": model}
 
 
 def alter(config: AlterConfig, out_dir: Path, limit: int | None) -> None:
@@ -156,21 +161,22 @@ def alter(config: AlterConfig, out_dir: Path, limit: int | None) -> None:
             )
             if limit is not None:
                 tasks = rng.sample(tasks, min(limit, len(tasks)))
+            llm = config.alter_llm
             jobs += [
-                (f"{split}-{record.id}", partial(alter_one, client, config.alter_llm.model, record, cats))
+                (f"{split}-{record.id}", partial(alter_one, client, llm.model, record, cats, llm.extra_body))
                 for record, cats in tasks
             ]
     failed = run_resumable(jobs, out_dir / "alterations.jsonl", config.max_workers)
     print(f"{len(jobs)} alteration tasks, {failed} failed (rerun to retry them)")
 
 
-def verify(config: AlterConfig, out_dir: Path) -> None:
+def verify(config: AlterConfig, out_dir: Path, splits: tuple[str, ...]) -> None:
     client = make_client(config.verify_llm)
     # Only alterations that pass the automatic checks are worth a verifier call
     jobs = [
         (alt["task_id"], partial(verify_one, client, config.verify_llm.model, alt))
         for alt in read_jsonl(out_dir / "alterations.jsonl")
-        if automatic_failure(alt) is None
+        if automatic_failure(alt) is None and alt["split"] in splits
     ]
     failed = run_resumable(jobs, out_dir / "verdicts.jsonl", config.max_workers)
     print(f"{len(jobs)} verification tasks, {failed} failed (rerun to retry them)")
@@ -182,6 +188,7 @@ def main() -> None:
     parser.add_argument("stage", choices=["alter", "verify", "finalize"])
     parser.add_argument("--limit", type=int)
     parser.add_argument("--out-dir", type=Path)
+    parser.add_argument("--splits", nargs="+", default=["train", "validation", "test"])
     args = parser.parse_args()
     config = load_alter_config(args.config)
     out_dir = args.out_dir or config.out_dir
@@ -189,11 +196,11 @@ def main() -> None:
     if args.stage == "alter":
         alter(config, out_dir, args.limit)
     elif args.stage == "verify":
-        verify(config, out_dir)
+        verify(config, out_dir, tuple(args.splits))
     else:
         verdicts = {v["task_id"]: v["valid"] for v in read_jsonl(out_dir / "verdicts.jsonl")}
         alterations = read_jsonl(out_dir / "alterations.jsonl")
-        print(json.dumps(finalize(alterations, verdicts, out_dir), indent=2))
+        print(json.dumps(finalize(alterations, verdicts, out_dir, tuple(args.splits)), indent=2))
 
 
 if __name__ == "__main__":

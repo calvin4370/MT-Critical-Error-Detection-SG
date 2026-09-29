@@ -16,6 +16,8 @@ max_workers: 16
 alter_llm:
   base_url: http://localhost:8000/v1
   model: Qwen/Qwen3-8B-AWQ
+  # Qwen3's "thinking" mode writes long reasoning first; not needed for small edits
+  extra_body: {chat_template_kwargs: {enable_thinking: false}}
 verify_llm:
   base_url: http://localhost:8000/v1
   model: RedHatAI/gemma-3-12b-it-quantized.w4a16   # different family from Qwen; reads zh/ms/ta

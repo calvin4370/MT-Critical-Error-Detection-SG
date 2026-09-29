@@ -1,0 +1,9 @@
+# The workflow settings for Docker Compose (see configs/docker/harness.yaml)
+
+harness_config: configs/docker/harness.yaml
+translator: sealion
+evaluator: sealion-evaluator  # the Phase 4 fine-tuned adapter
+checker: gemma                # a different model measures errors that slip through
+max_attempts: 3
+sample_per_language: 300
+out_dir: outputs/workflow

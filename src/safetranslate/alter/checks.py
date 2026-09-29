@@ -67,7 +67,10 @@ def automatic_failure(alteration: dict) -> str | None:
 
 
 def finalize(
-    alterations: list[dict], verdicts: dict[str, bool], out_dir: Path
+    alterations: list[dict],
+    verdicts: dict[str, bool],
+    out_dir: Path,
+    verified_splits: tuple[str, ...] = ("train", "validation", "test"),
 ) -> dict:
     """Writes the final examples per split, a spot-check sample and a report.
 
@@ -82,7 +85,8 @@ def finalize(
     passed_by_group: dict[str, list[dict]] = defaultdict(list)
     for alt in alterations:
         failure = automatic_failure(alt)
-        if failure is None and not verdicts.get(alt["task_id"], False):
+        needs_verdict = alt["split"] in verified_splits
+        if failure is None and needs_verdict and not verdicts.get(alt["task_id"], False):
             failure = "verifier_rejected" if alt["task_id"] in verdicts else "not_verified"
         group = f"{alt['split']}/{alt['target_lang']}/{'+'.join(sorted(alt['requested']))}"
         outcomes[f"{group}: {failure or 'passed'}"] += 1
