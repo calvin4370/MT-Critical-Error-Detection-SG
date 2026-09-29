@@ -7,7 +7,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from safetranslate.data.schema import Language
+from safetranslate.data.schema import Language, Split
 
 # Known dataset names; a new dataset is added here together with its loader
 TrainingCorpusName = Literal["wikimedia"]
@@ -119,3 +119,47 @@ def load_data_config(path: str | Path) -> DataConfig:
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     return DataConfig.model_validate(raw)
+
+
+class LLMEndpoint(_StrictModel):
+    """An OpenAI-compatible chat API (a local vLLM server, OpenRouter, SageMaker...).
+
+    Attributes:
+        base_url: API address, e.g. "http://localhost:8000/v1".
+        model: Model name as the server knows it.
+        api_key_env: Environment variable holding the API key; None for local servers.
+    """
+
+    base_url: str
+    model: str
+    api_key_env: str | None = None
+
+
+class AlterConfig(_StrictModel):
+    """Settings for making the altered (known-error) data (Phase 2).
+
+    Attributes:
+        processed_dir: Folder with train/validation/test.jsonl from Phase 1.
+        out_dir: Folder for the altered data and its report.
+        seed: Random seed for picking sentences and categories.
+        per_category: How many sentences to alter per category per language, per split.
+        multi_error_share: Share of altered sentences that get 2-3 errors.
+        max_workers: How many LLM requests to send in parallel.
+        alter_llm: Model that makes the alterations.
+        verify_llm: Different model that confirms each error.
+    """
+
+    processed_dir: Path
+    out_dir: Path
+    seed: int
+    per_category: dict[Split, int]
+    multi_error_share: float = Field(ge=0, le=1)
+    max_workers: int = Field(gt=0)
+    alter_llm: LLMEndpoint
+    verify_llm: LLMEndpoint
+
+
+def load_alter_config(path: str | Path) -> AlterConfig:
+    """Reads and validates an alteration config YAML file."""
+    with open(path, encoding="utf-8") as f:
+        return AlterConfig.model_validate(yaml.safe_load(f))

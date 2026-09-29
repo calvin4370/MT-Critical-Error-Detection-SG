@@ -1,9 +1,9 @@
 """wikimedia (OPUS): Wikipedia articles translated by editors; our training corpus."""
 
-import urllib.request
 import zipfile
 from pathlib import Path
 
+from safetranslate.data.download import fetch
 from safetranslate.data.schema import Language, Record
 
 BASE_URL = "https://object.pouta.csc.fi/OPUS-wikimedia/v20260327/moses"
@@ -11,10 +11,8 @@ BASE_URL = "https://object.pouta.csc.fi/OPUS-wikimedia/v20260327/moses"
 
 def download(raw_dir: Path, lang: Language) -> None:
     """Downloads the zipped English/target pair for one language if not already present."""
-    raw_dir.mkdir(parents=True, exist_ok=True)
-    path = raw_dir / f"en-{lang}.txt.zip"
-    if not path.exists():
-        urllib.request.urlretrieve(f"{BASE_URL}/{path.name}", path)
+    name = f"en-{lang}.txt.zip"
+    fetch(f"{BASE_URL}/{name}", raw_dir / name)
 
 
 def load(raw_dir: Path, lang: Language) -> list[Record]:

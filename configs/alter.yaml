@@ -1,0 +1,21 @@
+# Settings for making the altered (known-error) data (Phase 2)
+
+processed_dir: data/processed
+out_dir: data/altered
+seed: 0
+
+per_category:
+  train: 1000        # x5 categories = ~5,000 sentences per language
+  validation: 50     # from FLORES+ dev
+  test: 300          # from all four test sets
+
+multi_error_share: 0.2
+max_workers: 16
+
+# Both run on the GPU PC's vLLM server (one model at a time)
+alter_llm:
+  base_url: http://localhost:8000/v1
+  model: Qwen/Qwen3-8B-AWQ
+verify_llm:
+  base_url: http://localhost:8000/v1
+  model: RedHatAI/gemma-3-12b-it-quantized.w4a16   # different family from Qwen; reads zh/ms/ta
